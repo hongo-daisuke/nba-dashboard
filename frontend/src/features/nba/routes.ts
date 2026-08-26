@@ -10,6 +10,10 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./views/PlayersView.vue'),
   },
   {
+    path: '/players/:playerId',
+    component: () => import('./views/PlayerDetailView.vue'),
+  },
+  {
     path: '/games',
     component: () => import('./views/GamesView.vue'),
   },

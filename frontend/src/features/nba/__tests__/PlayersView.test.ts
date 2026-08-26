@@ -5,6 +5,10 @@ import PlayersView from '../views/PlayersView.vue'
 import { nbaService } from '../services/nbaService'
 import type { Player } from '../types/nba'
 
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}))
+
 vi.mock('../services/nbaService')
 
 const makePlayer = (playerId: string, name: string, position: string, teamName: string): Player => ({
@@ -31,10 +35,6 @@ beforeEach(() => {
     players: mockPlayers,
     total: mockPlayers.length,
   })
-  vi.mocked(nbaService.getPlayerGameLog).mockResolvedValue({
-    gameLog: [],
-    total: 0,
-  })
 })
 
 describe('PlayersView', () => {
@@ -59,7 +59,7 @@ describe('PlayersView', () => {
     expect(wrapper.text()).toContain('Celtics')
   })
 
-  it('ポジションフィルターを選択すると API が再呼び出しされる', async () => {
+  it('初回ロードで position なし（全選手）で呼ばれること', async () => {
     vi.mocked(nbaService.getPlayers).mockResolvedValue({
       players: [makePlayer('p2', 'Anthony Davis', 'C', 'Lakers')],
       total: 1,
@@ -68,7 +68,6 @@ describe('PlayersView', () => {
     mount(PlayersView, { global: { plugins: [ElementPlus] } })
     await flushPromises()
 
-    // 初回ロードで position なし（全選手）で呼ばれること
     expect(vi.mocked(nbaService.getPlayers)).toHaveBeenCalledWith({ position: undefined })
   })
 
