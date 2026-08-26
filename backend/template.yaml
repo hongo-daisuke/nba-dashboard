@@ -530,7 +530,7 @@ Resources:
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-frontend-${AWS::AccountId}'
+      BucketName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-frontend'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
