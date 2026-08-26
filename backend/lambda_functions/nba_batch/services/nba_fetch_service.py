@@ -53,17 +53,24 @@ def fetch_teams(season: str) -> list[dict]:
         team = t["team"]
         abbr = team["abbreviation"]
         static = TEAM_STATIC.get(abbr, {})
-        result.append({
+        if not static:
+            logger.warning("TEAM_STATIC に未登録の abbreviation", extra={"abbreviation": abbr, "full_name": team.get("displayName", "")})
+
+        item: dict = {
             "team_id": str(team["id"]),
             "full_name": team["displayName"],
             "abbreviation": abbr,
             "nickname": team["name"],
             "city": team["location"],
-            "state": static.get("state", ""),
             "year_founded": static.get("year_founded", 0),
-            "conference": static.get("conference", ""),
-            "division": static.get("division", ""),
-        })
+        }
+        # conference / division / state は GSI キーになりうるため、空文字を書かない
+        for field in ("conference", "division", "state"):
+            value = static.get(field, "")
+            if value:
+                item[field] = value
+
+        result.append(item)
 
     logger.info("チームデータ取得完了", extra={"count": len(result)})
     return result
