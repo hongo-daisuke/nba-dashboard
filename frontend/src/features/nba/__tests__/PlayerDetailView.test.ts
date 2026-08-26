@@ -89,7 +89,7 @@ describe('PlayerDetailView', () => {
     expect(wrapper.text()).toContain('SF')
   })
 
-  it('シーズンスタッツが表示される', async () => {
+  it('平均スタッツが表示される', async () => {
     const wrapper = mount(PlayerDetailView, { global: { plugins: [ElementPlus] } })
     await flushPromises()
     expect(wrapper.text()).toContain('2024-25')
@@ -97,6 +97,8 @@ describe('PlayerDetailView', () => {
     expect(wrapper.text()).toContain('PTS')
     expect(wrapper.text()).toContain('REB')
     expect(wrapper.text()).toContain('AST')
+    // 1820 / 71 = 25.6
+    expect(wrapper.text()).toContain('25.6')
   })
 
   it('ゲームログが表示される', async () => {
