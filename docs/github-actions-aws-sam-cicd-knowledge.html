@@ -1,0 +1,2521 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="ja-JP" xml:lang="ja-JP">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>GitHub Actions + AWS SAM CI/CD 設計・構築ナレッジ</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <style>
+  :root { color-scheme: light dark; }
+  html { scroll-behavior: smooth; }
+  body { max-width: 1120px; margin: 0 auto; padding: 32px 48px 80px; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP","Hiragino Kaku Gothic ProN",Meiryo,sans-serif; line-height: 1.75; color:#1f2937; background:#fff; }
+  h1,h2,h3,h4 { line-height:1.35; scroll-margin-top:20px; }
+  h1 { font-size:2.15rem; border-bottom:4px solid #111827; padding-bottom:.35em; }
+  h2 { margin-top:2.2em; border-left:6px solid #4b5563; padding-left:.7em; }
+  h3 { margin-top:1.65em; }
+  a { color:#075985; }
+  blockquote { margin:1.2em 0; padding:.8em 1.1em; background:#f3f4f6; border-left:5px solid #9ca3af; }
+  pre { overflow-x:auto; padding:16px 18px; border-radius:8px; background:#111827; color:#f9fafb; line-height:1.5; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  :not(pre)>code { padding:.12em .35em; border-radius:4px; background:#f3f4f6; color:#7c2d12; }
+  table { width:100%; border-collapse:collapse; margin:1.2em 0 1.8em; display:table; }
+  th,td { border:1px solid #d1d5db; padding:9px 11px; vertical-align:top; }
+  th { background:#f3f4f6; text-align:left; }
+  #TOC { background:#f8fafc; border:1px solid #d1d5db; border-radius:10px; padding:18px 24px; margin:24px 0 40px; }
+  #TOC ul { margin-top:.35em; }
+  hr { border:0; border-top:1px solid #d1d5db; margin:2.5em 0; }
+  @media (max-width:760px) { body{padding:20px 18px 60px;} table{display:block;overflow-x:auto;} }
+  @media (prefers-color-scheme:dark) { body{color:#e5e7eb;background:#111827;} h1{border-color:#e5e7eb;} h2{border-color:#9ca3af;} a{color:#7dd3fc;} blockquote,#TOC{background:#1f2937;border-color:#4b5563;color:#e5e7eb;} :not(pre)>code{background:#1f2937;color:#fdba74;} th{background:#1f2937;} th,td{border-color:#4b5563;} }
+  @media print { body{max-width:none;padding:0;color:#000;background:#fff;font-size:10.5pt;} #TOC{break-after:page;} pre,table{break-inside:avoid;} a{color:#000;text-decoration:none;} }
+  </style>
+</head>
+<body>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#github-actions--aws-sam-cicd-設計構築ナレッジ"
+id="toc-github-actions--aws-sam-cicd-設計構築ナレッジ">GitHub Actions +
+AWS SAM CI/CD 設計・構築ナレッジ</a>
+<ul>
+<li><a href="#0-この資料の目的" id="toc-0-この資料の目的">0.
+この資料の目的</a>
+<ul>
+<li><a href="#この資料の前提"
+id="toc-この資料の前提">この資料の前提</a></li>
+<li><a href="#01-5分で分かる全体像" id="toc-01-5分で分かる全体像">0.1
+5分で分かる全体像</a>
+<ul>
+<li><a href="#architecture" id="toc-architecture">Architecture</a></li>
+<li><a href="#pr--dev--main--deploy" id="toc-pr--dev--main--deploy">PR →
+dev / main → Deploy</a></li>
+<li><a href="#backend--frontend" id="toc-backend--frontend">Backend →
+Frontend</a></li>
+<li><a href="#github-actions--aws-oidc"
+id="toc-github-actions--aws-oidc">GitHub Actions → AWS OIDC</a></li>
+</ul></li>
+<li><a href="#02-読む順番" id="toc-02-読む順番">0.2 読む順番</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#1-最終構成の要点" id="toc-1-最終構成の要点">1.
+最終構成の要点</a></li>
+<li><a href="#2-モノレポとポリレポ-今回どちらを選んだか"
+id="toc-2-モノレポとポリレポ-今回どちらを選んだか">2.
+モノレポとポリレポ: 今回どちらを選んだか</a>
+<ul>
+<li><a href="#21-モノレポとは" id="toc-21-モノレポとは">2.1
+モノレポとは</a></li>
+<li><a href="#22-ポリレポマルチレポとは"
+id="toc-22-ポリレポマルチレポとは">2.2
+ポリレポ（マルチレポ）とは</a></li>
+<li><a href="#23-今回モノレポを選んだ理由"
+id="toc-23-今回モノレポを選んだ理由">2.3
+今回モノレポを選んだ理由</a></li>
+<li><a href="#24-比較" id="toc-24-比較">2.4 比較</a></li>
+<li><a href="#25-ポリレポにするなら何が変わるか"
+id="toc-25-ポリレポにするなら何が変わるか">2.5
+ポリレポにするなら何が変わるか</a>
+<ul>
+<li><a href="#ポリレポを選びやすいケース"
+id="toc-ポリレポを選びやすいケース">ポリレポを選びやすいケース</a></li>
+</ul></li>
+</ul></li>
+<li><a
+href="#3-初期構成-frontend-と-backend-が別々にデプロイを開始していた"
+id="toc-3-初期構成-frontend-と-backend-が別々にデプロイを開始していた">3.
+初期構成: Frontend と Backend が別々にデプロイを開始していた</a>
+<ul>
+<li><a href="#問題1-frontend-と-backend-の実行順序を保証できない"
+id="toc-問題1-frontend-と-backend-の実行順序を保証できない">問題1:
+Frontend と Backend の実行順序を保証できない</a></li>
+<li><a href="#問題2-同じ情報を複数箇所で手入力する"
+id="toc-問題2-同じ情報を複数箇所で手入力する">問題2:
+同じ情報を複数箇所で手入力する</a></li>
+</ul></li>
+<li><a href="#4-最終-workflow-構成-orchestrator--reusable-workflows"
+id="toc-4-最終-workflow-構成-orchestrator--reusable-workflows">4. 最終
+Workflow 構成: Orchestrator + Reusable Workflows</a>
+<ul>
+<li><a href="#41-deployyml-唯一の入口"
+id="toc-41-deployyml-唯一の入口">4.1 <code>deploy.yml</code>:
+唯一の入口</a></li>
+<li><a href="#42-deploy-backendyml-backend-の責務だけを持つ"
+id="toc-42-deploy-backendyml-backend-の責務だけを持つ">4.2
+<code>deploy-backend.yml</code>: Backend の責務だけを持つ</a></li>
+<li><a href="#43-deploy-frontendyml-frontend-の責務だけを持つ"
+id="toc-43-deploy-frontendyml-frontend-の責務だけを持つ">4.3
+<code>deploy-frontend.yml</code>: Frontend の責務だけを持つ</a></li>
+<li><a href="#44-なぜ-1-つの巨大-yaml-にしなかったか"
+id="toc-44-なぜ-1-つの巨大-yaml-にしなかったか">4.4 なぜ 1 つの巨大 YAML
+にしなかったか</a></li>
+</ul></li>
+<li><a href="#5-backend--frontend-の順序を保証する"
+id="toc-5-backend--frontend-の順序を保証する">5. Backend → Frontend
+の順序を保証する</a>
+<ul>
+<li><a href="#frontend-だけ変わったときも-backend-を通す理由"
+id="toc-frontend-だけ変わったときも-backend-を通す理由">Frontend
+だけ変わったときも Backend を通す理由</a></li>
+</ul></li>
+<li><a href="#6-cloudformation-outputs-を契約にする"
+id="toc-6-cloudformation-outputs-を契約にする">6. CloudFormation Outputs
+を契約にする</a>
+<ul>
+<li><a href="#なぜ手入力を減らすのか"
+id="toc-なぜ手入力を減らすのか">なぜ手入力を減らすのか</a></li>
+</ul></li>
+<li><a href="#7-api-endpoint-の-bootstrap-問題"
+id="toc-7-api-endpoint-の-bootstrap-問題">7. API Endpoint の bootstrap
+問題</a></li>
+<li><a href="#8-github-environment-dev--prd-の設定"
+id="toc-8-github-environment-dev--prd-の設定">8. GitHub Environment: dev
+/ prd の設定</a>
+<ul>
+<li><a href="#environment-secrets"
+id="toc-environment-secrets">Environment Secrets</a></li>
+<li><a href="#environment-variables"
+id="toc-environment-variables">Environment Variables</a>
+<ul>
+<li><a href="#secret-と-variable-の考え方"
+id="toc-secret-と-variable-の考え方">Secret と Variable
+の考え方</a></li>
+</ul></li>
+<li><a href="#deployment-branch-の推奨"
+id="toc-deployment-branch-の推奨">Deployment branch の推奨</a></li>
+</ul></li>
+<li><a href="#9-reusable-workflow-で-secrets-が空になった問題"
+id="toc-9-reusable-workflow-で-secrets-が空になった問題">9. Reusable
+Workflow で Secrets が空になった問題</a>
+<ul>
+<li><a href="#91-environment-secret-自体が壊れているのか確認"
+id="toc-91-environment-secret-自体が壊れているのか確認">9.1 Environment
+Secret 自体が壊れているのか確認</a></li>
+<li><a href="#92-onworkflow_callsecrets-を追加しただけでは解決しない"
+id="toc-92-onworkflow_callsecrets-を追加しただけでは解決しない">9.2
+<code>on.workflow_call.secrets</code>
+を追加しただけでは解決しない</a></li>
+<li><a href="#93-今回の解決と現在の運用-secrets-inherit"
+id="toc-93-今回の解決と現在の運用-secrets-inherit">9.3
+今回の解決と現在の運用: <code>secrets: inherit</code></a>
+<ul>
+<li><a href="#トラブルシュート用の安全な存在確認"
+id="toc-トラブルシュート用の安全な存在確認">トラブルシュート用の安全な存在確認</a></li>
+<li><a href="#現在の-repository-に残る後片付け"
+id="toc-現在の-repository-に残る後片付け">現在の Repository
+に残る後片付け</a></li>
+</ul></li>
+<li><a
+href="#94-reusable-workflow-の-permissions-は-caller-が上限になる"
+id="toc-94-reusable-workflow-の-permissions-は-caller-が上限になる">9.4
+Reusable Workflow の <code>permissions</code> は caller
+が上限になる</a></li>
+</ul></li>
+<li><a href="#10-aws-oidc-access-key-を-github-に保存しない"
+id="toc-10-aws-oidc-access-key-を-github-に保存しない">10. AWS OIDC:
+Access Key を GitHub に保存しない</a></li>
+<li><a href="#11-assumerolewithwebidentity-が拒否された問題"
+id="toc-11-assumerolewithwebidentity-が拒否された問題">11.
+<code>AssumeRoleWithWebIdentity</code> が拒否された問題</a>
+<ul>
+<li><a href="#111-元の-trust-policy" id="toc-111-元の-trust-policy">11.1
+元の Trust Policy</a></li>
+<li><a href="#112-2026-年の-github-oidc-immutable-subject-変更"
+id="toc-112-2026-年の-github-oidc-immutable-subject-変更">11.2 2026 年の
+GitHub OIDC immutable subject 変更</a></li>
+<li><a href="#113-1-role-を複数-repository-で使う設計を維持する場合"
+id="toc-113-1-role-を複数-repository-で使う設計を維持する場合">11.3 1
+Role を複数 Repository で使う設計を維持する場合</a></li>
+</ul></li>
+<li><a href="#12-sam-deploy-で-lambda-layer-が見つからなかった問題"
+id="toc-12-sam-deploy-で-lambda-layer-が見つからなかった問題">12. SAM
+Deploy で Lambda Layer が見つからなかった問題</a>
+<ul>
+<li><a href="#layerzip-は-git-管理するべきか"
+id="toc-layerzip-は-git-管理するべきか"><code>layer.zip</code> は Git
+管理するべきか</a></li>
+</ul></li>
+<li><a href="#13-s3-deploy-と-cloudfront-の構成"
+id="toc-13-s3-deploy-と-cloudfront-の構成">13. S3 Deploy と CloudFront
+の構成</a>
+<ul>
+<li><a href="#s3-は-bucket-root-へ-deploy-する"
+id="toc-s3-は-bucket-root-へ-deploy-する">S3 は Bucket root へ Deploy
+する</a></li>
+<li><a href="#cloudfront-origin-は-s3-bucket-root"
+id="toc-cloudfront-origin-は-s3-bucket-root">CloudFront Origin は S3
+Bucket root</a></li>
+<li><a href="#bucket-policy-は-cloudfront-oac-に限定する"
+id="toc-bucket-policy-は-cloudfront-oac-に限定する">Bucket Policy は
+CloudFront OAC に限定する</a></li>
+<li><a href="#deploy-前後の安全確認"
+id="toc-deploy-前後の安全確認">Deploy 前後の安全確認</a></li>
+<li><a href="#deploy-後は-cloudfront-invalidation"
+id="toc-deploy-後は-cloudfront-invalidation">Deploy 後は CloudFront
+Invalidation</a></li>
+</ul></li>
+<li><a href="#14-pr-check-の設計" id="toc-14-pr-check-の設計">14. PR
+Check の設計</a>
+<ul>
+<li><a href="#backend-check" id="toc-backend-check">Backend
+Check</a></li>
+<li><a href="#frontend-check" id="toc-frontend-check">Frontend
+Check</a></li>
+<li><a href="#実際に-pr-check-で見つかった問題"
+id="toc-実際に-pr-check-で見つかった問題">実際に PR Check
+で見つかった問題</a></li>
+</ul></li>
+<li><a href="#15-github-actions-の配置場所でハマった問題"
+id="toc-15-github-actions-の配置場所でハマった問題">15. GitHub Actions
+の配置場所でハマった問題</a></li>
+<li><a href="#16-github-new-branch-rules--rulesets"
+id="toc-16-github-new-branch-rules--rulesets">16. GitHub New Branch
+Rules / Rulesets</a>
+<ul>
+<li><a href="#必須-status-check" id="toc-必須-status-check">必須 Status
+Check</a></li>
+<li><a href="#設定の考え方" id="toc-設定の考え方">設定の考え方</a>
+<ul>
+<li><a href="#bypass" id="toc-bypass">Bypass</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#17-github-environment-と-ruleset-は役割が違う"
+id="toc-17-github-environment-と-ruleset-は役割が違う">17. GitHub
+Environment と Ruleset は役割が違う</a>
+<ul>
+<li><a href="#ruleset" id="toc-ruleset">Ruleset</a></li>
+<li><a href="#environment" id="toc-environment">Environment</a></li>
+</ul></li>
+<li><a href="#18-concurrency-の考え方"
+id="toc-18-concurrency-の考え方">18. Concurrency の考え方</a></li>
+<li><a href="#19-samconfigtoml-を環境別設定の-source-of-truth-にする"
+id="toc-19-samconfigtoml-を環境別設定の-source-of-truth-にする">19.
+<code>samconfig.toml</code> を環境別設定の Source of Truth
+にする</a></li>
+<li><a href="#20-最終設定チェックリスト--別プロジェクトへの横展開"
+id="toc-20-最終設定チェックリスト--別プロジェクトへの横展開">20.
+最終設定チェックリスト / 別プロジェクトへの横展開</a>
+<ul>
+<li><a href="#repository-files" id="toc-repository-files">Repository
+files</a></li>
+<li><a href="#environment-dev--prd"
+id="toc-environment-dev--prd">Environment: dev / prd</a></li>
+<li><a href="#rulesets" id="toc-rulesets">Rulesets</a></li>
+<li><a href="#aws-iam--oidc" id="toc-aws-iam--oidc">AWS IAM /
+OIDC</a></li>
+<li><a href="#横展開するときの確認順"
+id="toc-横展開するときの確認順">横展開するときの確認順</a></li>
+</ul></li>
+<li><a href="#21-最終-deployyml-の要点"
+id="toc-21-最終-deployyml-の要点">21. 最終 <code>deploy.yml</code>
+の要点</a></li>
+<li><a href="#22-トラブルシューティングプレイブック"
+id="toc-22-トラブルシューティングプレイブック">22.
+トラブルシューティング・プレイブック</a>
+<ul>
+<li><a
+href="#症状-required-check-が-expected---waiting-for-status-to-be-reported"
+id="toc-症状-required-check-が-expected---waiting-for-status-to-be-reported">症状:
+Required Check が
+<code>Expected - Waiting for status to be reported</code></a></li>
+<li><a href="#症状-aws_role_arn-is-not-configured"
+id="toc-症状-aws_role_arn-is-not-configured">症状:
+<code>AWS_ROLE_ARN is not configured</code></a></li>
+<li><a
+href="#症状-not-authorized-to-perform-stsassumerolewithwebidentity"
+id="toc-症状-not-authorized-to-perform-stsassumerolewithwebidentity">症状:
+<code>Not authorized to perform sts:AssumeRoleWithWebIdentity</code></a></li>
+<li><a href="#症状-unable-to-upload-artifact-frontendapilayer"
+id="toc-症状-unable-to-upload-artifact-frontendapilayer">症状:
+<code>Unable to upload artifact FrontendApiLayer</code></a></li>
+<li><a href="#症状-npm-ci-failure" id="toc-症状-npm-ci-failure">症状:
+<code>npm ci</code> failure</a></li>
+<li><a href="#症状-unit-test--build-failure"
+id="toc-症状-unit-test--build-failure">症状: Unit Test / Build
+failure</a></li>
+</ul></li>
+<li><a href="#23-構築の時系列と最終的に残った学び"
+id="toc-23-構築の時系列と最終的に残った学び">23.
+構築の時系列と、最終的に残った学び</a></li>
+<li><a href="#24-本番適用前-todo--known-issues"
+id="toc-24-本番適用前-todo--known-issues">24. 本番適用前 TODO / Known
+Issues</a>
+<ul>
+<li><a href="#241-本番適用前に解消する-todo"
+id="toc-241-本番適用前に解消する-todo">24.1 本番適用前に解消する
+TODO</a>
+<ul>
+<li><a href="#debug-job-を削除する" id="toc-debug-job-を削除する">Debug
+Job を削除する</a></li>
+<li><a href="#iam-permission-を最小権限化する"
+id="toc-iam-permission-を最小権限化する">IAM Permission
+を最小権限化する</a></li>
+</ul></li>
+<li><a href="#242-known-issues--将来の改善候補"
+id="toc-242-known-issues--将来の改善候補">24.2 Known Issues /
+将来の改善候補</a>
+<ul>
+<li><a href="#action-version-の固定方針"
+id="toc-action-version-の固定方針">Action version の固定方針</a></li>
+<li><a href="#prd-approval" id="toc-prd-approval">prd approval</a></li>
+<li><a href="#deploy-の-path-最適化"
+id="toc-deploy-の-path-最適化">Deploy の path 最適化</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#25-最終的な設計原則" id="toc-25-最終的な設計原則">25.
+最終的な設計原則</a>
+<ul>
+<li><a href="#1-deploy-の入口は-1-つにする"
+id="toc-1-deploy-の入口は-1-つにする">1. Deploy の入口は 1
+つにする</a></li>
+<li><a href="#2-実処理は責務で分ける" id="toc-2-実処理は責務で分ける">2.
+実処理は責務で分ける</a></li>
+<li><a href="#3-backend-を先にする" id="toc-3-backend-を先にする">3.
+Backend を先にする</a></li>
+<li><a href="#4-aws-が作った値は-aws-から取る"
+id="toc-4-aws-が作った値は-aws-から取る">4. AWS が作った値は AWS
+から取る</a></li>
+<li><a href="#5-environment-は設定とデプロイ境界に使う"
+id="toc-5-environment-は設定とデプロイ境界に使う">5. Environment
+は設定とデプロイ境界に使う</a></li>
+<li><a href="#6-secret--environment-のスコープを明示する"
+id="toc-6-secret--environment-のスコープを明示する">6. Secret /
+Environment のスコープを明示する</a></li>
+<li><a href="#7-aws-認証は-oidc" id="toc-7-aws-認証は-oidc">7. AWS
+認証は OIDC</a></li>
+<li><a href="#8-iam-は-permission-と-trust-を分けて考える"
+id="toc-8-iam-は-permission-と-trust-を分けて考える">8. IAM は
+Permission と Trust を分けて考える</a></li>
+<li><a href="#9-build-artifact-は-git-管理しない"
+id="toc-9-build-artifact-は-git-管理しない">9. Build artifact は Git
+管理しない</a></li>
+<li><a href="#10-pr-check-と-deploy-は分ける"
+id="toc-10-pr-check-と-deploy-は分ける">10. PR Check と Deploy
+は分ける</a></li>
+</ul></li>
+<li><a href="#26-参考-公式ドキュメント"
+id="toc-26-参考-公式ドキュメント">26. 参考: 公式ドキュメント</a>
+<ul>
+<li><a href="#github-actions" id="toc-github-actions">GitHub
+Actions</a></li>
+<li><a href="#vite" id="toc-vite">Vite</a></li>
+<li><a href="#aws" id="toc-aws">AWS</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="github-actions--aws-sam-cicd-設計構築ナレッジ">GitHub Actions +
+AWS SAM CI/CD 設計・構築ナレッジ</h1>
+<blockquote>
+<p>対象: Vue/Vite フロントエンド + AWS SAM バックエンドを 1
+リポジトリで管理し、GitHub Actions から dev / prd
+へ安全にデプロイする構成<br />
+初版: 2026-08-20 / 更新: 2026-08-26<br />
+ベース: 個人学習用 <code>nba-dashboard</code>
+の現在実装と、構築時のトラブルシュート記録</p>
+</blockquote>
+<hr />
+<h2 id="0-この資料の目的">0. この資料の目的</h2>
+<p>この資料は「完成した YAML
+の説明書」ではなく、<strong>なぜその構成にしたのか、何が問題になり、どう切り分け、最終的にどうすれば再利用できる形になるのか</strong>を残すためのナレッジです。</p>
+<p>特に次の観点を重視します。</p>
+<ul>
+<li>GitHub Actions で何ができるのか</li>
+<li>どこに何を設定するのか</li>
+<li>なぜその設定が必要なのか</li>
+<li>似た構成の別案と何が違うのか</li>
+<li>実際に遭遇したエラーをどう切り分けたのか</li>
+<li>別プロジェクトへ横展開するとき、どこを置き換えればよいのか</li>
+</ul>
+<p>アプリケーション機能そのものではなく、CI/CD・Repository 運用・AWS
+認証・デプロイ設計に集中します。</p>
+<h3 id="この資料の前提">この資料の前提</h3>
+<p>現在のリポジトリ構成を基準に、Workflow、SAM
+Template、<code>samconfig.toml</code>、Frontend 設定、Git
+履歴を確認しています。</p>
+<p>CI/CD の基本構成を整えた後もアプリケーション開発は進み、SAM Template
+には DynamoDB、NBA データ取得 Batch Lambda、ScheduleV2
+などが追加されていますが、<code>.github/workflows/</code>
+の基本構成は維持されています。</p>
+<p>初期 Frontend Deploy の説明は、現在確認できる初期 Workflow
+と、その後に採用した設計判断をもとに整理しています。</p>
+<blockquote>
+<p><strong>表記ルール: 今回の実装 / 実測</strong><br />
+<code>nba-dashboard</code>
+の実ファイルと、構築・検証時の記録で確認した内容です。</p>
+<p><strong>表記ルール: 一般仕様</strong><br />
+GitHub / AWS / Vite
+の公式仕様として確認した内容です。今回の実測結果と一般仕様が混ざらないように分けて記載します。</p>
+</blockquote>
+<h3 id="01-5分で分かる全体像">0.1 5分で分かる全体像</h3>
+<h4 id="architecture">Architecture</h4>
+<pre class="text"><code>Browser
+   |
+   +----------------------&gt; CloudFront -&gt; Private S3
+   |
+   +----------------------&gt; API Gateway
+                               |
+                               v
+                         API Lambda (Python)
+                               |
+                               v
+                            DynamoDB
+
+ScheduleV2
+   |
+   v
+Batch Lambda (Python)
+   |
+   v
+DynamoDB</code></pre>
+<p>Infrastructure は AWS SAM / CloudFormation で管理します。現在の SAM
+Template では、Frontend 配信用の S3 / CloudFront、API Gateway / API
+Lambda に加え、DynamoDB と NBA データ取得 Batch Lambda / ScheduleV2
+も管理しています。</p>
+<h4 id="pr--dev--main--deploy">PR → dev / main → Deploy</h4>
+<pre class="text"><code>feature/*
+   |
+   +--&gt; Pull Request
+          |
+          +--&gt; Backend Check
+          +--&gt; Frontend Check
+          |
+          v
+        Merge
+          |
+          +--&gt; dev  -&gt; dev Environment
+          |
+          +--&gt; main -&gt; prd Environment</code></pre>
+<p><code>feature/*</code> は共有環境へ直接 Deploy せず、PR Check
+を通して <code>dev</code> / <code>main</code> へ Merge された後に Deploy
+します。</p>
+<h4 id="backend--frontend">Backend → Frontend</h4>
+<pre class="text"><code>deploy.yml
+   |
+   v
+deploy-backend.yml
+   |  SAM Deploy
+   |  CloudFormation Outputs
+   |  - ApiEndpoint
+   |  - FrontendBucketName
+   |  - CloudFrontDistributionId
+   v
+deploy-frontend.yml
+   |  .env 生成
+   |  Vite Build
+   |  S3 root Deploy
+   v
+CloudFront Invalidation</code></pre>
+<p>Frontend は Backend / Infrastructure
+が作った値に依存するため、<code>needs: backend</code>
+で順序を保証します。</p>
+<h4 id="github-actions--aws-oidc">GitHub Actions → AWS OIDC</h4>
+<pre class="text"><code>GitHub Actions
+   |
+   | OIDC token
+   v
+AWS STS
+   |
+   | AssumeRoleWithWebIdentity
+   v
+IAM Role
+   |
+   v
+Temporary Credentials</code></pre>
+<p>固定 Access Key / Secret Access Key を GitHub に保存せず、一時
+Credential で AWS へ Deploy します。</p>
+<p>ここまでで全体像は十分です。以降は、**「なぜこの構成になったか」「設定方法」「実際にハマった問題」**を必要に応じて読んでください。</p>
+<h3 id="02-読む順番">0.2 読む順番</h3>
+<table>
+<thead>
+<tr class="header">
+<th>読みたい内容</th>
+<th>推奨する章</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>まず全体像だけ知りたい</td>
+<td>0.1 → 1</td>
+</tr>
+<tr class="even">
+<td>初めて構成を理解する</td>
+<td>1 → 3 → 4 → 5 → 6 → 8 → 10 → 25</td>
+</tr>
+<tr class="odd">
+<td>実際に設定・横展開する</td>
+<td>20 → 21 → 25</td>
+</tr>
+<tr class="even">
+<td>Secret / OIDC 周りを理解する</td>
+<td>8 → 9 → 10 → 11</td>
+</tr>
+<tr class="odd">
+<td>エラーを調べる</td>
+<td>22 → 該当する詳細章</td>
+</tr>
+<tr class="even">
+<td>この構成に至った経緯を知る</td>
+<td>3 → 23</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="1-最終構成の要点">1. 最終構成の要点</h1>
+<p>5分版の全体像は「0.1
+5分で分かる全体像」を参照してください。ここでは、以降の詳細章を読むために
+Branch と Deploy の対応だけを押さえます。</p>
+<pre class="text"><code>Pull Request Check -&gt; merge -&gt; Deploy -&gt; Backend / SAM -&gt; CloudFormation Outputs -&gt; Frontend</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th>Branch</th>
+<th style="text-align: right;">Pull Request Check</th>
+<th style="text-align: right;">Deploy</th>
+<th>GitHub Environment</th>
+<th>SAM config-env</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>feature/*</code></td>
+<td style="text-align: right;">Yes</td>
+<td style="text-align: right;">No</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr class="even">
+<td><code>dev</code></td>
+<td style="text-align: right;">Yes</td>
+<td style="text-align: right;">Yes</td>
+<td><code>dev</code></td>
+<td><code>dev</code></td>
+</tr>
+<tr class="odd">
+<td><code>main</code></td>
+<td style="text-align: right;">Yes</td>
+<td style="text-align: right;">Yes</td>
+<td><code>prd</code></td>
+<td><code>prd</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>feature branch を共有 dev
+環境へ直接デプロイしない</strong>のが今回の方針です。複数 feature branch
+が同じ共有環境を上書きすると、PR で確認したコードと実際の dev
+環境が一致しなくなるためです。</p>
+<p>AWS/SAM の現在の基本命名は次です。</p>
+<pre class="text"><code>ResourcePrefix = hongo
+Environment    = dev / prd
+ProjectName    = nba-dashboard
+
+dev Stack = hongo-dev-nba-dashboard
+prd Stack = hongo-prd-nba-dashboard</code></pre>
+<p>詳細は、Workflow 構成を 4 章、Backend → Frontend の順序を 5
+章、値の受け渡しを 6 章で説明します。</p>
+<hr />
+<h1 id="2-モノレポとポリレポ-今回どちらを選んだか">2.
+モノレポとポリレポ: 今回どちらを選んだか</h1>
+<h2 id="21-モノレポとは">2.1 モノレポとは</h2>
+<p>モノレポでは、Frontend と Backend を同じ Git Repository
+に置きます。</p>
+<p>今回の構成はこれです。</p>
+<pre class="text"><code>nba-dashboard/
+├── frontend/
+├── backend/
+└── .github/
+    └── workflows/
+        ├── backend-pr-check.yml
+        ├── frontend-pr-check.yml
+        ├── deploy.yml
+        ├── deploy-backend.yml
+        └── deploy-frontend.yml</code></pre>
+<h2 id="22-ポリレポマルチレポとは">2.2 ポリレポ（マルチレポ）とは</h2>
+<p>Frontend / Backend を別 Repository に分けます。</p>
+<pre class="text"><code>nba-dashboard-frontend/
+├── frontend source
+└── .github/workflows/
+
+nba-dashboard-backend/
+├── SAM source
+└── .github/workflows/</code></pre>
+<h2 id="23-今回モノレポを選んだ理由">2.3 今回モノレポを選んだ理由</h2>
+<p>今回のシステムでは Frontend と Backend
+のデプロイ依存が強いため、モノレポが扱いやすい構成でした。</p>
+<p>Backend の SAM Deploy 後に初めて、次の値が確定します。</p>
+<ul>
+<li>API Gateway Endpoint</li>
+<li>Frontend S3 Bucket 名</li>
+<li>CloudFront Distribution ID</li>
+</ul>
+<p>Frontend はその値を使って Build / Deploy します。</p>
+<p>同じ Repository なら、GitHub Actions の <code>needs</code> と
+reusable workflow outputs を使って次のように直結できます。</p>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">jobs</span><span class="kw">:</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">backend</span><span class="kw">:</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> ./.github/workflows/deploy-backend.yml</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">frontend</span><span class="kw">:</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">needs</span><span class="kw">:</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> backend</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> ./.github/workflows/deploy-frontend.yml</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">with</span><span class="kw">:</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">api_endpoint</span><span class="kw">:</span><span class="at"> ${{ needs.backend.outputs.api_endpoint }}</span></span></code></pre></div>
+<p>このため、今回の要件では「Backend と Frontend を別 Repository
+に分けるメリット」よりも「同一 Run
+内で順番と値の受け渡しを管理できるメリット」の方が大きいと判断しました。</p>
+<h2 id="24-比較">2.4 比較</h2>
+<table>
+<thead>
+<tr class="header">
+<th>観点</th>
+<th>モノレポ</th>
+<th>ポリレポ</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Frontend / Backend</td>
+<td>同一 Repo</td>
+<td>別 Repo</td>
+</tr>
+<tr class="even">
+<td>1 PR で両方変更</td>
+<td>容易</td>
+<td>Repo をまたぐため難しい</td>
+</tr>
+<tr class="odd">
+<td>Backend → Frontend の順序</td>
+<td><code>needs</code> で表現可能</td>
+<td>Repo 間連携が必要</td>
+</tr>
+<tr class="even">
+<td>CloudFormation Outputs 受け渡し</td>
+<td>Workflow output で直接</td>
+<td>SSM 等の共有ストアが必要になりやすい</td>
+</tr>
+<tr class="odd">
+<td>Branch 戦略</td>
+<td>共通化しやすい</td>
+<td>Repo ごとに独立</td>
+</tr>
+<tr class="even">
+<td>Rulesets</td>
+<td>1 Repo で設定</td>
+<td>各 Repo で設定</td>
+</tr>
+<tr class="odd">
+<td>チームの独立性</td>
+<td>中</td>
+<td>高</td>
+</tr>
+<tr class="even">
+<td>Release 周期の独立性</td>
+<td>中</td>
+<td>高</td>
+</tr>
+<tr class="odd">
+<td>CI/CD の初期複雑度</td>
+<td>低め</td>
+<td>高め</td>
+</tr>
+</tbody>
+</table>
+<h2 id="25-ポリレポにするなら何が変わるか">2.5
+ポリレポにするなら何が変わるか</h2>
+<p>Repository を分けると、次は使えません。</p>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">needs</span><span class="kw">:</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> backend</span></span></code></pre></div>
+<p><code>needs</code> は同じ Workflow 内の Job 依存を表すため、別
+Repository の Workflow には直接つなげられません。</p>
+<p>そこで、Backend の成果物を AWS
+側へ保存する方式が分かりやすいです。</p>
+<pre class="text"><code>Backend Repository
+    |
+    +--&gt; sam deploy
+    |
+    +--&gt; CloudFormation Outputs
+    |
+    +--&gt; SSM Parameter Store
+          - /nba-dashboard/dev/api-endpoint
+          - /nba-dashboard/dev/frontend-bucket
+          - /nba-dashboard/dev/cloudfront-distribution-id
+
+Frontend Repository
+    |
+    +--&gt; AWS OIDC
+    |
+    +--&gt; SSM Parameter Store から取得
+    |
+    +--&gt; .env 生成
+    |
+    +--&gt; Build / S3 / CloudFront</code></pre>
+<p>Backend 側のイメージ:</p>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Store deployment outputs</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="fu">  run</span><span class="kw">: </span><span class="ch">|</span></span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>    aws ssm put-parameter \</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>      --name &quot;/nba-dashboard/${TARGET_ENVIRONMENT}/api-endpoint&quot; \</span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>      --type String \</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>      --overwrite \</span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>      --value &quot;$API_ENDPOINT&quot;</span></code></pre></div>
+<p>Frontend 側のイメージ:</p>
+<div class="sourceCode" id="cb13"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Resolve backend endpoint</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="fu">  run</span><span class="kw">: </span><span class="ch">|</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>    API_ENDPOINT=&quot;$(</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a>      aws ssm get-parameter \</span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a>        --name &quot;/nba-dashboard/${TARGET_ENVIRONMENT}/api-endpoint&quot; \</span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>        --query &#39;Parameter.Value&#39; \</span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>        --output text</span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>    )&quot;</span></code></pre></div>
+<p>また、Backend Deploy 完了後に Frontend Workflow を API
+で起動する構成も可能ですが、認証・再実行・失敗時の再開位置・Repository
+間権限などを別途設計する必要があります。</p>
+<h3 id="ポリレポを選びやすいケース">ポリレポを選びやすいケース</h3>
+<ul>
+<li>Frontend / Backend が別チーム</li>
+<li>Release 周期を完全に独立させたい</li>
+<li>Backend を複数 Frontend から利用する</li>
+<li>Repository 単位で IAM / GitHub 権限を厳密に分けたい</li>
+<li>1 つの Backend が複数製品から使われる</li>
+</ul>
+<p>今回のように 1 アプリケーションとして同時に dev/prd
+へ出すなら、モノレポはかなり自然です。</p>
+<hr />
+<h1
+id="3-初期構成-frontend-と-backend-が別々にデプロイを開始していた">3.
+初期構成: Frontend と Backend が別々にデプロイを開始していた</h1>
+<p>初期 Git 履歴には、次の独立 Workflow がありました。</p>
+<pre class="text"><code>.github/
+├── build-and-sync-to-s3-learning.yml
+└── build-and-deploy-backend-learning.yml</code></pre>
+<p>初期 Frontend Workflow は概ね次の責務を 1 Job に持っていました。</p>
+<pre class="text"><code>Frontend change
+   |
+   +--&gt; npm ci
+   +--&gt; Unit Test
+   +--&gt; ENV_FILE -&gt; .env
+   +--&gt; BUILD_MODE を GitHub Variable から取得
+   +--&gt; Vite Build
+   +--&gt; AWS OIDC
+   +--&gt; S3 sync
+   +--&gt; CloudFront Invalidation</code></pre>
+<p>設定値として、当初は次のようなものを GitHub Environment
+に持たせる想定でした。</p>
+<pre class="text"><code>AWS_ROLE_ARN
+AWS_REGION
+AWS_ACCOUNT_ID
+ENV_FILE
+BUILD_MODE
+S3_BUCKET_NAME</code></pre>
+<p>Backend は別 Workflow で独立して SAM Deploy していました。</p>
+<h2 id="問題1-frontend-と-backend-の実行順序を保証できない">問題1:
+Frontend と Backend の実行順序を保証できない</h2>
+<p>独立した <code>push</code> Workflow にすると、Frontend と Backend
+が同時に走れます。</p>
+<pre class="text"><code>push
+├--&gt; backend workflow
+└--&gt; frontend workflow</code></pre>
+<p>しかし Frontend は、Backend が作る API Gateway URL
+を必要とします。</p>
+<pre class="text"><code>Frontend Build
+    |
+    +--&gt; API URL が必要
+              ^
+              |
+          SAM Deploy 後に確定</code></pre>
+<p>このため、<strong>Backend を先に完了させ、その結果を Frontend
+に渡す必要がある</strong>と整理しました。</p>
+<h2 id="問題2-同じ情報を複数箇所で手入力する">問題2:
+同じ情報を複数箇所で手入力する</h2>
+<p>S3 Bucket、Stack Name、Build Mode、API URL を GitHub Variables
+へ持つと、AWS / <code>samconfig.toml</code> / GitHub
+の間で同じ情報を重複管理します。</p>
+<pre class="text"><code>CloudFormation
+GitHub Environment
+samconfig.toml</code></pre>
+<p>この状態では、どれが正しい値なのか分かりづらくなります。</p>
+<p>そこで最終的には Source of Truth を明確にしました。</p>
+<table>
+<thead>
+<tr class="header">
+<th>値</th>
+<th>Source of Truth</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Stack Name</td>
+<td><code>samconfig.toml</code></td>
+</tr>
+<tr class="even">
+<td>API Endpoint</td>
+<td>CloudFormation Output</td>
+</tr>
+<tr class="odd">
+<td>Frontend S3 Bucket</td>
+<td>CloudFormation Output</td>
+</tr>
+<tr class="even">
+<td>CloudFront Distribution ID</td>
+<td>CloudFormation Output</td>
+</tr>
+<tr class="odd">
+<td>dev / prd</td>
+<td>Orchestrator の <code>target_environment</code></td>
+</tr>
+<tr class="even">
+<td>AWS Region</td>
+<td>GitHub Environment Variable</td>
+</tr>
+<tr class="odd">
+<td>AWS Account ID</td>
+<td>GitHub Environment Variable</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="4-最終-workflow-構成-orchestrator--reusable-workflows">4. 最終
+Workflow 構成: Orchestrator + Reusable Workflows</h1>
+<p>最終的に Deploy を 3 ファイルへ分離しました。</p>
+<pre class="text"><code>.github/workflows/
+├── deploy.yml
+├── deploy-backend.yml
+└── deploy-frontend.yml</code></pre>
+<h2 id="41-deployyml-唯一の入口">4.1 <code>deploy.yml</code>:
+唯一の入口</h2>
+<p>このファイルだけが <code>push</code> / <code>workflow_dispatch</code>
+を持ちます。</p>
+<p>主な責務:</p>
+<ul>
+<li>Deploy の開始条件</li>
+<li>Branch → Environment の決定</li>
+<li>feature branch を拒否</li>
+<li>Deploy 全体の concurrency</li>
+<li>Backend → Frontend 順序保証</li>
+<li>Backend Outputs → Frontend Inputs の受け渡し</li>
+</ul>
+<div class="sourceCode" id="cb21"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="fu">on</span><span class="kw">:</span></span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">push</span><span class="kw">:</span></span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">branches</span><span class="kw">:</span></span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> main</span></span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> dev</span></span>
+<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">paths</span><span class="kw">:</span></span>
+<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&#39;backend/**&#39;</span></span>
+<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&#39;frontend/**&#39;</span></span>
+<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&#39;.github/workflows/deploy.yml&#39;</span></span>
+<span id="cb21-10"><a href="#cb21-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&#39;.github/workflows/deploy-backend.yml&#39;</span></span>
+<span id="cb21-11"><a href="#cb21-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&#39;.github/workflows/deploy-frontend.yml&#39;</span></span></code></pre></div>
+<p>README だけの変更などでは Deploy しません。</p>
+<h2 id="42-deploy-backendyml-backend-の責務だけを持つ">4.2
+<code>deploy-backend.yml</code>: Backend の責務だけを持つ</h2>
+<p><code>workflow_call</code> だけを持つ reusable workflow です。</p>
+<div class="sourceCode" id="cb22"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="fu">on</span><span class="kw">:</span></span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">workflow_call</span><span class="kw">:</span></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">inputs</span><span class="kw">:</span></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">target_environment</span><span class="kw">:</span></span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">type</span><span class="kw">:</span><span class="at"> string</span></span>
+<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">outputs</span><span class="kw">:</span></span>
+<span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">api_endpoint</span><span class="kw">:</span></span>
+<span id="cb22-10"><a href="#cb22-10" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">value</span><span class="kw">:</span><span class="at"> ${{ jobs.build-and-deploy.outputs.api_endpoint }}</span></span>
+<span id="cb22-11"><a href="#cb22-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">frontend_bucket_name</span><span class="kw">:</span></span>
+<span id="cb22-12"><a href="#cb22-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">value</span><span class="kw">:</span><span class="at"> ${{ jobs.build-and-deploy.outputs.frontend_bucket_name }}</span></span>
+<span id="cb22-13"><a href="#cb22-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">cloudfront_distribution_id</span><span class="kw">:</span></span>
+<span id="cb22-14"><a href="#cb22-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">value</span><span class="kw">:</span><span class="at"> ${{ jobs.build-and-deploy.outputs.cloudfront_distribution_id }}</span></span></code></pre></div>
+<p>この Workflow 自身は branch を見て dev/prd を決めません。決定済みの
+<code>target_environment</code> を受け取るだけです。</p>
+<h2 id="43-deploy-frontendyml-frontend-の責務だけを持つ">4.3
+<code>deploy-frontend.yml</code>: Frontend の責務だけを持つ</h2>
+<p>Backend が返した値を input として受け取ります。</p>
+<div class="sourceCode" id="cb23"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="fu">on</span><span class="kw">:</span></span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">workflow_call</span><span class="kw">:</span></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">inputs</span><span class="kw">:</span></span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">target_environment</span><span class="kw">:</span></span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">type</span><span class="kw">:</span><span class="at"> string</span></span>
+<span id="cb23-7"><a href="#cb23-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">api_endpoint</span><span class="kw">:</span></span>
+<span id="cb23-8"><a href="#cb23-8" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb23-9"><a href="#cb23-9" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">type</span><span class="kw">:</span><span class="at"> string</span></span>
+<span id="cb23-10"><a href="#cb23-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">frontend_bucket_name</span><span class="kw">:</span></span>
+<span id="cb23-11"><a href="#cb23-11" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb23-12"><a href="#cb23-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">type</span><span class="kw">:</span><span class="at"> string</span></span>
+<span id="cb23-13"><a href="#cb23-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">cloudfront_distribution_id</span><span class="kw">:</span></span>
+<span id="cb23-14"><a href="#cb23-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb23-15"><a href="#cb23-15" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">type</span><span class="kw">:</span><span class="at"> string</span></span></code></pre></div>
+<h2 id="44-なぜ-1-つの巨大-yaml-にしなかったか">4.4 なぜ 1 つの巨大 YAML
+にしなかったか</h2>
+<p>1 ファイルでも実装できますが、Frontend と Backend
+の責務が混ざります。</p>
+<pre class="text"><code>巨大 deploy.yml
+├── Branch 判定
+├── Python / SAM
+├── CloudFormation
+├── Node / Vitest
+├── .env
+├── S3
+└── CloudFront</code></pre>
+<p>Reusable Workflow
+に分けることで、入口と実処理の責務が分離されます。</p>
+<pre class="text"><code>deploy.yml
+   |
+   +--&gt; deploy-backend.yml
+   |
+   +--&gt; deploy-frontend.yml</code></pre>
+<p>「実行条件を変える」変更と「Backend
+のデプロイ方法を変える」変更が別ファイルになるため、レビューもしやすくなります。</p>
+<hr />
+<h1 id="5-backend--frontend-の順序を保証する">5. Backend → Frontend
+の順序を保証する</h1>
+<p>最終構成の中核です。</p>
+<div class="sourceCode" id="cb26"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="fu">frontend</span><span class="kw">:</span></span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">needs</span><span class="kw">:</span></span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> prepare</span></span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> backend</span></span></code></pre></div>
+<p><code>needs: backend</code> により、Backend が成功するまで Frontend
+は開始しません。</p>
+<pre class="text"><code>prepare
+   |
+   v
+backend
+   |
+   | success
+   v
+frontend</code></pre>
+<p>Backend が失敗すれば Frontend
+はスキップされます。実際のトラブルシュートでも、Backend の OIDC / SAM
+Deploy が失敗したとき Frontend
+が開始されなかったため、順序制御が正しく機能していることを確認できました。</p>
+<h2 id="frontend-だけ変わったときも-backend-を通す理由">Frontend
+だけ変わったときも Backend を通す理由</h2>
+<p>現在の Trigger は <code>backend/**</code> または
+<code>frontend/**</code> の変更で Deploy 全体を開始します。</p>
+<p>そのため Frontend-only change でも Backend Workflow を通ります。</p>
+<p>ただし SAM Deploy は次を付けています。</p>
+<div class="sourceCode" id="cb28"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="ex">--no-fail-on-empty-changeset</span></span></code></pre></div>
+<p>CloudFormation に変更がなければ正常終了し、そのまま Frontend
+へ進みます。</p>
+<p>これは job-level の複雑な path
+判定を入れず、<strong>常に同じデプロイ経路を通す単純さを優先した設計</strong>です。</p>
+<p>将来デプロイ時間が問題になったら、変更ファイルを判定して Backend
+をスキップする最適化を追加できます。ただし、その場合は「Backend outputs
+をどこから取得するか」という別問題が増えます。</p>
+<hr />
+<h1 id="6-cloudformation-outputs-を契約にする">6. CloudFormation Outputs
+を契約にする</h1>
+<p>SAM Template は、Frontend Workflow が必要な値を Outputs
+として公開します。</p>
+<div class="sourceCode" id="cb29"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb29-1"><a href="#cb29-1" aria-hidden="true" tabindex="-1"></a><span class="fu">Outputs</span><span class="kw">:</span></span>
+<span id="cb29-2"><a href="#cb29-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">ApiEndpoint</span><span class="kw">:</span></span>
+<span id="cb29-3"><a href="#cb29-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">Value</span><span class="kw">:</span><span class="at"> !Sub &#39;https://${FrontendApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}&#39;</span></span>
+<span id="cb29-4"><a href="#cb29-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb29-5"><a href="#cb29-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">FrontendBucketName</span><span class="kw">:</span></span>
+<span id="cb29-6"><a href="#cb29-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">Value</span><span class="kw">:</span><span class="at"> !Ref FrontendBucket</span></span>
+<span id="cb29-7"><a href="#cb29-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb29-8"><a href="#cb29-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">CloudFrontDistributionId</span><span class="kw">:</span></span>
+<span id="cb29-9"><a href="#cb29-9" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">Value</span><span class="kw">:</span><span class="at"> !Ref FrontendDistribution</span></span></code></pre></div>
+<p>Backend Workflow は Deploy 後に
+<code>aws cloudformation describe-stacks</code> で値を取得します。</p>
+<pre class="text"><code>SAM Deploy
+   |
+   v
+CloudFormation Stack
+   |
+   +--&gt; ApiEndpoint
+   +--&gt; FrontendBucketName
+   +--&gt; CloudFrontDistributionId
+   |
+   v
+Workflow Outputs
+   |
+   v
+Frontend Inputs</code></pre>
+<p>この設計により、次の GitHub Variables は不要になりました。</p>
+<pre class="text"><code>S3_BUCKET_NAME   -&gt; 不要
+STACK_NAME       -&gt; 不要
+BUILD_MODE       -&gt; 不要
+API Gateway URL  -&gt; 不要</code></pre>
+<h3 id="なぜ手入力を減らすのか">なぜ手入力を減らすのか</h3>
+<p>手入力値が増えると、Infrastructure を作り直したときに GitHub
+側だけ古い値になる事故が起こります。</p>
+<pre class="text"><code>AWS: new bucket
+GitHub: old bucket  &lt;-- drift</code></pre>
+<p>CloudFormation が作った値は CloudFormation から取得することで、この
+drift を減らせます。</p>
+<hr />
+<h1 id="7-api-endpoint-の-bootstrap-問題">7. API Endpoint の bootstrap
+問題</h1>
+<p>これは今回の設計で重要だった問題です。</p>
+<p>Frontend の Vite Build は API URL を必要とします。しかし、初回 Deploy
+では API Gateway 自体がまだありません。</p>
+<pre class="text"><code>API URL がない
+    |
+    +--&gt; Frontend Build できない
+
+でも
+
+SAM Deploy しない
+    |
+    +--&gt; API URL が作られない</code></pre>
+<blockquote>
+<p><strong>今回の実装 / 実測</strong><br />
+<code>ENV_FILE</code> には API Gateway の実 URL
+を固定で保存せず、<code>VITE_API_BASE_URL=__API_ENDPOINT__</code>
+のようにプレースホルダーを持たせています。<code>deploy-backend.yml</code>
+が CloudFormation Output <code>ApiEndpoint</code>
+を取得し、<code>deploy.yml</code> がそれを
+<code>deploy-frontend.yml</code> へ input として渡します。</p>
+</blockquote>
+<pre class="dotenv"><code>VITE_API_BASE_URL=__API_ENDPOINT__
+VITE_APP_TITLE=Example</code></pre>
+<p>Frontend Workflow では、Build
+直前にプレースホルダーを置換して一時的な <code>.env</code>
+を生成します。</p>
+<div class="sourceCode" id="cb35"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb35-1"><a href="#cb35-1" aria-hidden="true" tabindex="-1"></a><span class="va">PLACEHOLDER</span><span class="op">=</span><span class="st">&quot;__API_ENDPOINT__&quot;</span></span>
+<span id="cb35-2"><a href="#cb35-2" aria-hidden="true" tabindex="-1"></a><span class="va">RENDERED_ENV</span><span class="op">=</span><span class="st">&quot;</span><span class="va">${ENV_FILE</span><span class="op">//</span><span class="va">$PLACEHOLDER</span><span class="op">/</span><span class="va">$API_ENDPOINT}</span><span class="st">&quot;</span></span>
+<span id="cb35-3"><a href="#cb35-3" aria-hidden="true" tabindex="-1"></a><span class="bu">printf</span> <span class="st">&#39;%s\n&#39;</span> <span class="st">&quot;</span><span class="va">$RENDERED_ENV</span><span class="st">&quot;</span> <span class="op">&gt;</span> .env</span></code></pre></div>
+<pre class="text"><code>SAM Deploy
+   |
+   v
+ApiEndpoint Output
+   |
+   v
+ENV_FILE の __API_ENDPOINT__ を置換
+   |
+   v
+frontend/.env を一時生成
+   |
+   v
+Vite Build
+   |
+   v
+.env 削除</code></pre>
+<p>これにより、<strong>AWS が空の状態からでも 1 回の Deploy Workflow で
+Backend と Frontend を構築できる</strong>ようになります。</p>
+<blockquote>
+<p><strong>一般仕様: Vite の環境変数</strong><br />
+<code>VITE_*</code> が付いた値は Build
+時にクライアント側コードへ埋め込まれます。したがって、<code>ENV_FILE</code>
+を GitHub Secret に保存していても、<code>VITE_*</code>
+の値そのものをブラウザから秘匿できるわけではありません。API Endpoint
+や画面タイトルのような公開してよい値に限定し、API Key、Password、Secret
+Key などの機密情報は <code>VITE_*</code> に入れません。</p>
+</blockquote>
+<p>GitHub Secret として <code>ENV_FILE</code> を保持する目的は、GitHub
+上で設定値を不用意に表示・編集・ログ出力しない運用に寄せるためであり、<strong>Frontend
+の秘密情報を安全に配信する仕組みではありません</strong>。</p>
+<blockquote>
+<p><strong>今回の Repository で紛らわしい点</strong><br />
+<code>frontend/.env</code>、<code>.env.dev</code>、<code>.env.prd</code>
+などのローカル用ファイルも存在しますが、root <code>.gitignore</code> の
+<code>.env</code> / <code>.env.*</code> で Git
+管理対象外になっています。GitHub Actions の Deploy で使う Source of
+Truth はこれらのローカルファイルではなく、GitHub Environment の
+<code>ENV_FILE</code> と CloudFormation Output <code>ApiEndpoint</code>
+です。</p>
+</blockquote>
+<hr />
+<h1 id="8-github-environment-dev--prd-の設定">8. GitHub Environment: dev
+/ prd の設定</h1>
+<p>Environment は Repository の次の場所で作成します。</p>
+<pre class="text"><code>Settings
+  -&gt; Environments
+      -&gt; dev
+      -&gt; prd</code></pre>
+<p>最終的に使う値は 4 つです。</p>
+<h2 id="environment-secrets">Environment Secrets</h2>
+<pre class="text"><code>AWS_ROLE_ARN
+ENV_FILE</code></pre>
+<h2 id="environment-variables">Environment Variables</h2>
+<pre class="text"><code>AWS_REGION
+AWS_ACCOUNT_ID</code></pre>
+<p>例:</p>
+<pre class="text"><code>Environment: dev
+├── Secrets
+│   ├── AWS_ROLE_ARN
+│   └── ENV_FILE
+└── Variables
+    ├── AWS_REGION
+    └── AWS_ACCOUNT_ID</code></pre>
+<p><code>prd</code> も同じキー名で値だけ切り替えます。</p>
+<h3 id="secret-と-variable-の考え方">Secret と Variable の考え方</h3>
+<ul>
+<li><code>secrets.X</code>: GitHub 上で Secret
+として扱い、ログへの露出を抑えたい設定</li>
+<li><code>vars.X</code>: 環境別に切り替える非機密設定</li>
+</ul>
+<blockquote>
+<p><strong>今回の実装 / 実測</strong><br />
+<code>AWS_ROLE_ARN</code> と <code>ENV_FILE</code> は Environment
+Secret、<code>AWS_REGION</code> と <code>AWS_ACCOUNT_ID</code> は
+Environment Variable として管理しています。Role ARN 自体は Credential
+ではありませんが、現在の Environment 設計に合わせて Secret
+側へ置いています。</p>
+</blockquote>
+<blockquote>
+<p><strong>一般仕様 / 注意</strong><br />
+GitHub Secret
+に置いた値が、そのままアプリケーション上でも秘密になるわけではありません。特に
+Vite の <code>VITE_*</code> はクライアント Bundle
+へ含まれるため、<code>ENV_FILE</code> 内には公開してよい Frontend
+設定だけを入れます。</p>
+</blockquote>
+<h2 id="deployment-branch-の推奨">Deployment branch の推奨</h2>
+<p>Deploy Workflow 自体が branch を制限していますが、Environment
+側でも二重に制限すると安全です。</p>
+<pre class="text"><code>dev -&gt; dev branch
+prd -&gt; main branch</code></pre>
+<p><code>feature/*</code> は最終設計では Deploy しないため、dev
+Environment の deployment branches に残さない方が意図が明確です。</p>
+<hr />
+<h1 id="9-reusable-workflow-で-secrets-が空になった問題">9. Reusable
+Workflow で Secrets が空になった問題</h1>
+<p>今回かなり時間を使ったポイントです。この章は、<strong>今回観測した事実</strong>と<strong>GitHub
+の一般仕様</strong>を分けて読みます。</p>
+<blockquote>
+<p><strong>今回の実測</strong><br />
+Backend Workflow の validation で <code>AWS_REGION</code> /
+<code>AWS_ACCOUNT_ID</code> は取得できる一方、<code>AWS_ROLE_ARN</code>
+が空になる状態を確認しました。その後、caller の reusable workflow call
+Job に <code>secrets: inherit</code>
+を追加した構成で問題が解消しました。</p>
+</blockquote>
+<pre class="text"><code>AWS_ROLE_ARN: 空
+AWS_REGION: ap-northeast-1
+AWS_ACCOUNT_ID: 値あり</code></pre>
+<h2 id="91-environment-secret-自体が壊れているのか確認">9.1 Environment
+Secret 自体が壊れているのか確認</h2>
+<p>一時的に通常 Job を <code>deploy.yml</code> へ追加し、Secret
+の<strong>値ではなく存在有無だけ</strong>を確認しました。</p>
+<div class="sourceCode" id="cb43"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb43-1"><a href="#cb43-1" aria-hidden="true" tabindex="-1"></a><span class="fu">debug-environment</span><span class="kw">:</span></span>
+<span id="cb43-2"><a href="#cb43-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">runs-on</span><span class="kw">:</span><span class="at"> ubuntu-latest</span></span>
+<span id="cb43-3"><a href="#cb43-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb43-4"><a href="#cb43-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">environment</span><span class="kw">:</span></span>
+<span id="cb43-5"><a href="#cb43-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> ${{ needs.prepare.outputs.target_environment }}</span></span>
+<span id="cb43-6"><a href="#cb43-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb43-7"><a href="#cb43-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">steps</span><span class="kw">:</span></span>
+<span id="cb43-8"><a href="#cb43-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Check environment values</span></span>
+<span id="cb43-9"><a href="#cb43-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">env</span><span class="kw">:</span></span>
+<span id="cb43-10"><a href="#cb43-10" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">AWS_ROLE_ARN</span><span class="kw">:</span><span class="at"> ${{ secrets.AWS_ROLE_ARN }}</span></span>
+<span id="cb43-11"><a href="#cb43-11" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">ENV_FILE</span><span class="kw">:</span><span class="at"> ${{ secrets.ENV_FILE }}</span></span>
+<span id="cb43-12"><a href="#cb43-12" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">AWS_REGION</span><span class="kw">:</span><span class="at"> ${{ vars.AWS_REGION }}</span></span>
+<span id="cb43-13"><a href="#cb43-13" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">AWS_ACCOUNT_ID</span><span class="kw">:</span><span class="at"> ${{ vars.AWS_ACCOUNT_ID }}</span></span>
+<span id="cb43-14"><a href="#cb43-14" aria-hidden="true" tabindex="-1"></a><span class="fu">      run</span><span class="kw">: </span><span class="ch">|</span></span>
+<span id="cb43-15"><a href="#cb43-15" aria-hidden="true" tabindex="-1"></a>        echo &quot;AWS_REGION exists: $([[ -n \&quot;${AWS_REGION:-}\&quot; ]] &amp;&amp; echo yes || echo no)&quot;</span>
+<span id="cb43-16"><a href="#cb43-16" aria-hidden="true" tabindex="-1"></a>        echo &quot;AWS_ACCOUNT_ID exists: $([[ -n \&quot;${AWS_ACCOUNT_ID:-}\&quot; ]] &amp;&amp; echo yes || echo no)&quot;</span>
+<span id="cb43-17"><a href="#cb43-17" aria-hidden="true" tabindex="-1"></a>        echo &quot;AWS_ROLE_ARN exists: $([[ -n \&quot;${AWS_ROLE_ARN:-}\&quot; ]] &amp;&amp; echo yes || echo no)&quot;</span>
+<span id="cb43-18"><a href="#cb43-18" aria-hidden="true" tabindex="-1"></a>        echo &quot;ENV_FILE exists: $([[ -n \&quot;${ENV_FILE:-}\&quot; ]] &amp;&amp; echo yes || echo no)&quot;</span></code></pre></div>
+<p>結果は 4 項目とも <code>yes</code> でした。これで、Environment
+への登録そのものは正常と切り分けられました。</p>
+<h2 id="92-onworkflow_callsecrets-を追加しただけでは解決しない">9.2
+<code>on.workflow_call.secrets</code> を追加しただけでは解決しない</h2>
+<p>一時的に reusable workflow 側へ次を追加しました。</p>
+<div class="sourceCode" id="cb44"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb44-1"><a href="#cb44-1" aria-hidden="true" tabindex="-1"></a><span class="fu">on</span><span class="kw">:</span></span>
+<span id="cb44-2"><a href="#cb44-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">workflow_call</span><span class="kw">:</span></span>
+<span id="cb44-3"><a href="#cb44-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">secrets</span><span class="kw">:</span></span>
+<span id="cb44-4"><a href="#cb44-4" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">AWS_ROLE_ARN</span><span class="kw">:</span></span>
+<span id="cb44-5"><a href="#cb44-5" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">required</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
+<p>しかし、これだけでは Secret は渡りません。</p>
+<blockquote>
+<p><strong>一般仕様</strong><br />
+<code>on.workflow_call.secrets</code> は、caller から受け取る Secret
+のインターフェースを定義するものです。値そのものを生成したり、自動的に
+caller から転送したりする設定ではありません。caller 側で個別に
+<code>secrets:</code> を指定するか、利用可能な場合は
+<code>secrets: inherit</code> を使います。</p>
+</blockquote>
+<h2 id="93-今回の解決と現在の運用-secrets-inherit">9.3
+今回の解決と現在の運用: <code>secrets: inherit</code></h2>
+<p>現在の <code>deploy.yml</code> では Backend / Frontend の reusable
+workflow 呼び出し Job に <code>secrets: inherit</code>
+を付けています。</p>
+<div class="sourceCode" id="cb45"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb45-1"><a href="#cb45-1" aria-hidden="true" tabindex="-1"></a><span class="fu">backend</span><span class="kw">:</span></span>
+<span id="cb45-2"><a href="#cb45-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> ./.github/workflows/deploy-backend.yml</span></span>
+<span id="cb45-3"><a href="#cb45-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">secrets</span><span class="kw">:</span><span class="at"> inherit</span></span>
+<span id="cb45-4"><a href="#cb45-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb45-5"><a href="#cb45-5" aria-hidden="true" tabindex="-1"></a><span class="fu">frontend</span><span class="kw">:</span></span>
+<span id="cb45-6"><a href="#cb45-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> ./.github/workflows/deploy-frontend.yml</span></span>
+<span id="cb45-7"><a href="#cb45-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">secrets</span><span class="kw">:</span><span class="at"> inherit</span></span></code></pre></div>
+<blockquote>
+<p><strong>今回の実測</strong><br />
+<code>secrets: inherit</code> を caller に明示した構成で
+<code>AWS_ROLE_ARN</code> の空問題が解消したため、現在の Repository
+ではこの形を採用しています。</p>
+</blockquote>
+<blockquote>
+<p><strong>一般仕様: Environment Secret との関係</strong><br />
+GitHub 公式では、reusable workflow の Job 自身に
+<code>environment:</code> が指定されている場合、その Job ではその
+Environment の Secret
+が使用されると説明されています。一方、<code>secrets: inherit</code> は
+caller が利用できる Secret を called workflow へ渡す仕組みです。<br />
+したがって、<strong>「Environment Secret を使うには必ず
+<code>secrets: inherit</code>
+が必要」ではありません</strong>。今回の実測結果を GitHub Actions
+全般のルールとして一般化せず、caller / called workflow の
+<code>environment:</code>、Secret
+のスコープ、渡し方を合わせて確認します。</p>
+</blockquote>
+<p>現在の構成では、called workflow 側の Deploy Job も Environment
+を明示しています。</p>
+<div class="sourceCode" id="cb46"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb46-1"><a href="#cb46-1" aria-hidden="true" tabindex="-1"></a><span class="fu">build-and-deploy</span><span class="kw">:</span></span>
+<span id="cb46-2"><a href="#cb46-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">environment</span><span class="kw">:</span></span>
+<span id="cb46-3"><a href="#cb46-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> ${{ inputs.target_environment }}</span></span></code></pre></div>
+<p>このため、設計を読むときは次の2つを分けます。</p>
+<pre class="text"><code>secrets: inherit
+  -&gt; Workflow 境界で Secret を渡す仕組み
+
+called workflow の environment:
+  -&gt; dev / prd Environment を Job に適用する仕組み</code></pre>
+<h3
+id="トラブルシュート用の安全な存在確認">トラブルシュート用の安全な存在確認</h3>
+<p>Secret 値そのものを出さずに確認します。</p>
+<div class="sourceCode" id="cb48"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb48-1"><a href="#cb48-1" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">run</span><span class="kw">:</span><span class="at"> echo &quot;ROLE_ARN set: ${{ secrets.AWS_ROLE_ARN != &#39;&#39; }}&quot;</span></span></code></pre></div>
+<p>または shell で空判定します。</p>
+<p><strong>Secret の値そのものを <code>echo</code>
+しない</strong>ことが重要です。</p>
+<h3 id="現在の-repository-に残る後片付け">現在の Repository
+に残る後片付け</h3>
+<p>現在の <code>deploy.yml</code> には、トラブルシュート用の
+<code>debug-environment</code> Job がまだ残っています。</p>
+<pre class="text"><code># ログ (削除します)
+debug-environment:</code></pre>
+<p>また、同じファイルに「Environment Secrets / Variables は caller
+から横流ししない」という古いコメントが残っていますが、現在は
+<code>secrets: inherit</code>
+も使用しています。<strong>実装とコメントを一致させるため、これも更新対象</strong>です。</p>
+<h2 id="94-reusable-workflow-の-permissions-は-caller-が上限になる">9.4
+Reusable Workflow の <code>permissions</code> は caller
+が上限になる</h2>
+<p>OIDC では <code>id-token: write</code> が必要です。Reusable Workflow
+では caller 側の call Job と called workflow
+側の両方で必要権限を確認します。</p>
+<p>Caller:</p>
+<div class="sourceCode" id="cb50"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb50-1"><a href="#cb50-1" aria-hidden="true" tabindex="-1"></a><span class="fu">backend</span><span class="kw">:</span></span>
+<span id="cb50-2"><a href="#cb50-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">permissions</span><span class="kw">:</span></span>
+<span id="cb50-3"><a href="#cb50-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">contents</span><span class="kw">:</span><span class="at"> read</span></span>
+<span id="cb50-4"><a href="#cb50-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">id-token</span><span class="kw">:</span><span class="at"> write</span></span>
+<span id="cb50-5"><a href="#cb50-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> ./.github/workflows/deploy-backend.yml</span></span></code></pre></div>
+<p>Called:</p>
+<div class="sourceCode" id="cb51"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a><span class="fu">permissions</span><span class="kw">:</span></span>
+<span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">contents</span><span class="kw">:</span><span class="at"> read</span></span>
+<span id="cb51-3"><a href="#cb51-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">id-token</span><span class="kw">:</span><span class="at"> write</span></span></code></pre></div>
+<blockquote>
+<p><strong>一般仕様</strong><br />
+Called workflow は caller から与えられた <code>GITHUB_TOKEN</code>
+permissions
+を勝手に強くできません。同じか、より制限的な権限にしかできないため、OIDC
+に必要な <code>id-token: write</code>
+を呼び出し境界の両側で確認します。</p>
+</blockquote>
+<hr />
+<h1 id="10-aws-oidc-access-key-を-github-に保存しない">10. AWS OIDC:
+Access Key を GitHub に保存しない</h1>
+<p>GitHub Actions から AWS へ接続するために、固定 Access Key を GitHub
+Secret に保存せず OIDC を使用しています。</p>
+<pre class="text"><code>GitHub Actions
+    |
+    | OIDC token
+    v
+AWS STS
+    |
+    | AssumeRoleWithWebIdentity
+    v
+IAM Role
+    |
+    v
+Temporary Credentials</code></pre>
+<p>Workflow には次が必要です。</p>
+<div class="sourceCode" id="cb53"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb53-1"><a href="#cb53-1" aria-hidden="true" tabindex="-1"></a><span class="fu">permissions</span><span class="kw">:</span></span>
+<span id="cb53-2"><a href="#cb53-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">contents</span><span class="kw">:</span><span class="at"> read</span></span>
+<span id="cb53-3"><a href="#cb53-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">id-token</span><span class="kw">:</span><span class="at"> write</span></span></code></pre></div>
+<p>認証:</p>
+<div class="sourceCode" id="cb54"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb54-1"><a href="#cb54-1" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">name</span><span class="kw">:</span><span class="at"> Configure AWS credentials from OIDC</span></span>
+<span id="cb54-2"><a href="#cb54-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> aws-actions/configure-aws-credentials@v6</span></span>
+<span id="cb54-3"><a href="#cb54-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">with</span><span class="kw">:</span></span>
+<span id="cb54-4"><a href="#cb54-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">role-to-assume</span><span class="kw">:</span><span class="at"> ${{ secrets.AWS_ROLE_ARN }}</span></span>
+<span id="cb54-5"><a href="#cb54-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">aws-region</span><span class="kw">:</span><span class="at"> ${{ vars.AWS_REGION }}</span></span>
+<span id="cb54-6"><a href="#cb54-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">allowed-account-ids</span><span class="kw">:</span><span class="at"> ${{ vars.AWS_ACCOUNT_ID }}</span></span></code></pre></div>
+<p><code>allowed-account-ids</code> は、取得した Credential が想定 AWS
+Account のものか確認する安全装置です。</p>
+<hr />
+<h1 id="11-assumerolewithwebidentity-が拒否された問題">11.
+<code>AssumeRoleWithWebIdentity</code> が拒否された問題</h1>
+<p>Secrets を解決した次に出たエラーです。</p>
+<pre class="text"><code>Could not assume role with OIDC:
+Not authorized to perform sts:AssumeRoleWithWebIdentity</code></pre>
+<p>ここで重要なのは、IAM Role の <strong>許可ポリシー</strong> と
+<strong>信頼ポリシー</strong> を分けて考えることです。</p>
+<pre class="text"><code>Trust Policy
+    |
+    | この GitHub OIDC は Role を引き受けてよいか？
+    v
+AssumeRole 成功
+    |
+    v
+Permission Policy
+    |
+    | Role を引き受けた後、AWS で何をしてよいか？
+    v
+S3 / CloudFormation / Lambda ...</code></pre>
+<p>Role に <code>AdministratorAccess</code> が付いていても、Trust Policy
+が OIDC Token を拒否すれば AssumeRole 自体ができません。</p>
+<h2 id="111-元の-trust-policy">11.1 元の Trust Policy</h2>
+<p>元は概ね次の条件でした。</p>
+<div class="sourceCode" id="cb57"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb57-1"><a href="#cb57-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb57-2"><a href="#cb57-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;Condition&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb57-3"><a href="#cb57-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;StringEquals&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb57-4"><a href="#cb57-4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;token.actions.githubusercontent.com:aud&quot;</span><span class="fu">:</span> <span class="st">&quot;sts.amazonaws.com&quot;</span></span>
+<span id="cb57-5"><a href="#cb57-5" aria-hidden="true" tabindex="-1"></a>    <span class="fu">},</span></span>
+<span id="cb57-6"><a href="#cb57-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;StringLike&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb57-7"><a href="#cb57-7" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;token.actions.githubusercontent.com:sub&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb57-8"><a href="#cb57-8" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;repo:hongo-daisuke/*&quot;</span><span class="ot">,</span></span>
+<span id="cb57-9"><a href="#cb57-9" aria-hidden="true" tabindex="-1"></a>        <span class="st">&quot;repo:hongo-daisuke/*&quot;</span></span>
+<span id="cb57-10"><a href="#cb57-10" aria-hidden="true" tabindex="-1"></a>      <span class="ot">]</span></span>
+<span id="cb57-11"><a href="#cb57-11" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb57-12"><a href="#cb57-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb57-13"><a href="#cb57-13" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>同じ値が 2 回ある点は単なる重複です。</p>
+<h2 id="112-2026-年の-github-oidc-immutable-subject-変更">11.2 2026 年の
+GitHub OIDC immutable subject 変更</h2>
+<p>GitHub.com では、2026-07-15 以降に作成された Repository
+などで、default OIDC <code>sub</code> に owner ID と repository ID
+を含む immutable 形式が使われます。</p>
+<p>従来:</p>
+<pre class="text"><code>repo:hongo-daisuke/nba-dashboard:environment:dev</code></pre>
+<p>immutable 形式:</p>
+<pre class="text"><code>repo:hongo-daisuke@OWNER_ID/nba-dashboard@REPO_ID:environment:dev</code></pre>
+<p>従来の Trust Policy:</p>
+<pre class="text"><code>repo:hongo-daisuke/*</code></pre>
+<p>は、<code>hongo-daisuke</code> の直後に <code>/</code>
+が来ることを期待します。</p>
+<p>immutable 形式では直後に <code>@OWNER_ID</code>
+が来るため、そのままでは一致しません。</p>
+<h2 id="113-1-role-を複数-repository-で使う設計を維持する場合">11.3 1
+Role を複数 Repository で使う設計を維持する場合</h2>
+<p>Repository ごとに ID を追加するのではなく、Owner ID
+まで固定して後ろを wildcard にできます。</p>
+<p>概念例:</p>
+<div class="sourceCode" id="cb61"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb61-1"><a href="#cb61-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb61-2"><a href="#cb61-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;StringEquals&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb61-3"><a href="#cb61-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;token.actions.githubusercontent.com:aud&quot;</span><span class="fu">:</span> <span class="st">&quot;sts.amazonaws.com&quot;</span></span>
+<span id="cb61-4"><a href="#cb61-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb61-5"><a href="#cb61-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;StringLike&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb61-6"><a href="#cb61-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;token.actions.githubusercontent.com:sub&quot;</span><span class="fu">:</span> <span class="ot">[</span></span>
+<span id="cb61-7"><a href="#cb61-7" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;repo:hongo-daisuke/*&quot;</span><span class="ot">,</span></span>
+<span id="cb61-8"><a href="#cb61-8" aria-hidden="true" tabindex="-1"></a>      <span class="st">&quot;repo:hongo-daisuke@OWNER_ID/*&quot;</span></span>
+<span id="cb61-9"><a href="#cb61-9" aria-hidden="true" tabindex="-1"></a>    <span class="ot">]</span></span>
+<span id="cb61-10"><a href="#cb61-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb61-11"><a href="#cb61-11" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<ul>
+<li>1 行目: 旧 subject 形式向け</li>
+<li>2 行目: immutable subject 形式向け</li>
+</ul>
+<p>これなら同じ owner 配下の複数 Repository を 1 Role
+で扱う方針を維持できます。</p>
+<p>ただし権限範囲は広いです。特に <code>AdministratorAccess</code>
+と「owner 配下全 Repository」を組み合わせると、その Role
+が侵害された場合の影響が大きくなります。本番運用では Repository /
+Environment 単位に絞るか、IAM Permission Policy
+を必要最小限にすることを推奨します。</p>
+<p>より厳密にする場合:</p>
+<pre class="text"><code>repo:hongo-daisuke@OWNER_ID/nba-dashboard@REPO_ID:environment:dev</code></pre>
+<p>のように Repository と Environment まで固定します。</p>
+<hr />
+<h1 id="12-sam-deploy-で-lambda-layer-が見つからなかった問題">12. SAM
+Deploy で Lambda Layer が見つからなかった問題</h1>
+<p>OIDC を突破した後、SAM Deploy で次のエラーが出ました。</p>
+<pre class="text"><code>Unable to upload artifact FrontendApiLayer
+...
+backend/.aws-sam/build/FrontendApiLayer does not exist</code></pre>
+<p>最初は「GitHub Actions 内で <code>create.sh</code>
+を実行し、<code>layer.zip</code> を作るべきか？」を検討しました。</p>
+<p>しかし実際の原因はもっと単純でした。</p>
+<p>Template:</p>
+<div class="sourceCode" id="cb64"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb64-1"><a href="#cb64-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ContentUri</span><span class="kw">:</span><span class="at"> Layer/</span></span></code></pre></div>
+<p>Repository:</p>
+<pre class="text"><code>backend/layer/
+├── create.sh
+└── requirements.txt</code></pre>
+<p>つまり、大文字小文字が違っていました。</p>
+<pre class="text"><code>Layer/  !=  layer/</code></pre>
+<p>GitHub-hosted <code>ubuntu-latest</code> は Linux
+のため、大文字小文字を区別します。Mac
+の一般的なデフォルトファイルシステムではこの差が表面化しにくいため、ローカルで気づかず
+CI で発見される典型的なケースです。</p>
+<p>修正:</p>
+<div class="sourceCode" id="cb67"><pre
+class="sourceCode diff"><code class="sourceCode diff"><span id="cb67-1"><a href="#cb67-1" aria-hidden="true" tabindex="-1"></a><span class="st">- ContentUri: Layer/</span></span>
+<span id="cb67-2"><a href="#cb67-2" aria-hidden="true" tabindex="-1"></a><span class="va">+ ContentUri: layer/</span></span></code></pre></div>
+<p>これで SAM Build / Deploy が成功しました。</p>
+<p>現在の Template では API 用の <code>layer/</code> に加えて Batch 用の
+<code>layer/batch/</code> も使っています。今回の教訓は FrontendApiLayer
+固有ではなく、<strong>SAM Template の <code>ContentUri</code> と
+Repository
+上の実ディレクトリ名を大文字小文字まで一致させる</strong>という一般的な確認ポイントとして残します。</p>
+<h2 id="layerzip-は-git-管理するべきか"><code>layer.zip</code> は Git
+管理するべきか</h2>
+<p>今回の構成では管理不要です。</p>
+<p>Template に次があります。</p>
+<div class="sourceCode" id="cb68"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb68-1"><a href="#cb68-1" aria-hidden="true" tabindex="-1"></a><span class="fu">Metadata</span><span class="kw">:</span></span>
+<span id="cb68-2"><a href="#cb68-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">BuildMethod</span><span class="kw">:</span><span class="at"> python3.13</span></span></code></pre></div>
+<p>そのため Source of Truth は、</p>
+<pre class="text"><code>backend/layer/requirements.txt</code></pre>
+<p>とし、<code>sam build</code> に Layer artifact を生成させます。</p>
+<pre class="text"><code>requirements.txt
+     |
+     v
+sam build
+     |
+     v
+.aws-sam/build/FrontendApiLayer
+     |
+     v
+sam deploy</code></pre>
+<p>生成物の <code>layer.zip</code> や <code>.aws-sam/</code> を
+Repository に入れる必要はありません。</p>
+<p>現在の <code>.gitignore</code> でも、</p>
+<pre class="gitignore"><code>.aws-sam/
+*.zip</code></pre>
+<p>が除外されています。</p>
+<p><code>create.sh</code> は手動で zip
+を作りたいローカル補助ツールとして残せますが、通常の GitHub Actions
+Deploy では <code>sam build</code>
+と責務が重複するため実行していません。</p>
+<hr />
+<h1 id="13-s3-deploy-と-cloudfront-の構成">13. S3 Deploy と CloudFront
+の構成</h1>
+<p>Frontend は <strong>CloudFront + OAC + 非公開 S3</strong>
+で配信します。</p>
+<pre class="text"><code>Browser
+   |
+   v
+CloudFront
+   |
+   | OAC / SigV4
+   v
+Private S3 Bucket
+├── index.html
+└── assets/</code></pre>
+<p>S3 Static Website Hosting を直接公開する構成ではありません。S3 の
+Public Access Block は有効のままにし、Bucket Policy では対象 CloudFront
+Distribution からの <code>s3:GetObject</code> のみを許可します。</p>
+<h2 id="s3-は-bucket-root-へ-deploy-する">S3 は Bucket root へ Deploy
+する</h2>
+<p>Vite の Build 成果物 <code>frontend/dist/</code> は Bucket
+のルートへ同期します。</p>
+<div class="sourceCode" id="cb73"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb73-1"><a href="#cb73-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> s3 sync <span class="dt">\</span></span>
+<span id="cb73-2"><a href="#cb73-2" aria-hidden="true" tabindex="-1"></a>  frontend/dist/ <span class="dt">\</span></span>
+<span id="cb73-3"><a href="#cb73-3" aria-hidden="true" tabindex="-1"></a>  <span class="st">&quot;s3://</span><span class="va">${FRONTEND_BUCKET_NAME}</span><span class="st">/&quot;</span> <span class="dt">\</span></span>
+<span id="cb73-4"><a href="#cb73-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--delete</span> <span class="dt">\</span></span>
+<span id="cb73-5"><a href="#cb73-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--only-show-errors</span></span></code></pre></div>
+<p>Deploy 後のイメージ:</p>
+<pre class="text"><code>S3 Bucket
+├── index.html
+└── assets/
+    ├── index-xxxx.js
+    └── index-xxxx.css</code></pre>
+<p>以前のような特定 prefix を配信ルートにする設計や、S3 内に Deploy
+前バックアップ用 prefix
+を持つ設計は採用しません。ロールバックが必要な場合は、正常だった commit
+へ revert して再 Deploy する方針です。</p>
+<h2 id="cloudfront-origin-は-s3-bucket-root">CloudFront Origin は S3
+Bucket root</h2>
+<p>CloudFront の Origin に <code>OriginPath</code> は設定しません。</p>
+<div class="sourceCode" id="cb75"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb75-1"><a href="#cb75-1" aria-hidden="true" tabindex="-1"></a><span class="fu">Origins</span><span class="kw">:</span></span>
+<span id="cb75-2"><a href="#cb75-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">Id</span><span class="kw">:</span><span class="at"> FrontendS3Origin</span></span>
+<span id="cb75-3"><a href="#cb75-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">DomainName</span><span class="kw">:</span><span class="at"> !GetAtt FrontendBucket.RegionalDomainName</span></span>
+<span id="cb75-4"><a href="#cb75-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">OriginAccessControlId</span><span class="kw">:</span><span class="at"> !GetAtt FrontendOAC.Id</span></span>
+<span id="cb75-5"><a href="#cb75-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">S3OriginConfig</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span></code></pre></div>
+<p><code>DefaultRootObject</code> は <code>index.html</code> です。</p>
+<div class="sourceCode" id="cb76"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb76-1"><a href="#cb76-1" aria-hidden="true" tabindex="-1"></a><span class="fu">DefaultRootObject</span><span class="kw">:</span><span class="at"> index.html</span></span></code></pre></div>
+<p>Vue Router など SPA の History Mode で直接 URL
+へアクセスした場合に備え、現在の Template では 403 / 404 を
+<code>/index.html</code> へフォールバックします。</p>
+<div class="sourceCode" id="cb77"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb77-1"><a href="#cb77-1" aria-hidden="true" tabindex="-1"></a><span class="fu">CustomErrorResponses</span><span class="kw">:</span></span>
+<span id="cb77-2"><a href="#cb77-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">ErrorCode</span><span class="kw">:</span><span class="at"> </span><span class="dv">403</span></span>
+<span id="cb77-3"><a href="#cb77-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">ResponseCode</span><span class="kw">:</span><span class="at"> </span><span class="dv">200</span></span>
+<span id="cb77-4"><a href="#cb77-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">ResponsePagePath</span><span class="kw">:</span><span class="at"> /index.html</span></span>
+<span id="cb77-5"><a href="#cb77-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> </span><span class="fu">ErrorCode</span><span class="kw">:</span><span class="at"> </span><span class="dv">404</span></span>
+<span id="cb77-6"><a href="#cb77-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">ResponseCode</span><span class="kw">:</span><span class="at"> </span><span class="dv">200</span></span>
+<span id="cb77-7"><a href="#cb77-7" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">ResponsePagePath</span><span class="kw">:</span><span class="at"> /index.html</span></span></code></pre></div>
+<h2 id="bucket-policy-は-cloudfront-oac-に限定する">Bucket Policy は
+CloudFront OAC に限定する</h2>
+<p>CloudFront から Bucket 内オブジェクトを取得できるよう、Bucket Policy
+は次の考え方です。</p>
+<div class="sourceCode" id="cb78"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb78-1"><a href="#cb78-1" aria-hidden="true" tabindex="-1"></a><span class="fu">Principal</span><span class="kw">:</span></span>
+<span id="cb78-2"><a href="#cb78-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">Service</span><span class="kw">:</span><span class="at"> cloudfront.amazonaws.com</span></span>
+<span id="cb78-3"><a href="#cb78-3" aria-hidden="true" tabindex="-1"></a><span class="fu">Action</span><span class="kw">:</span><span class="at"> s3:GetObject</span></span>
+<span id="cb78-4"><a href="#cb78-4" aria-hidden="true" tabindex="-1"></a><span class="fu">Resource</span><span class="kw">:</span><span class="at"> !Sub &#39;${FrontendBucket.Arn}/*&#39;</span></span>
+<span id="cb78-5"><a href="#cb78-5" aria-hidden="true" tabindex="-1"></a><span class="fu">Condition</span><span class="kw">:</span></span>
+<span id="cb78-6"><a href="#cb78-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">StringEquals</span><span class="kw">:</span></span>
+<span id="cb78-7"><a href="#cb78-7" aria-hidden="true" tabindex="-1"></a><span class="at">    AWS</span><span class="fu">:SourceArn</span><span class="kw">:</span><span class="at"> !Sub &#39;arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}&#39;</span></span></code></pre></div>
+<p>S3 自体を Public にせず、対象 Distribution
+からの読み取りだけを許可します。</p>
+<h2 id="deploy-前後の安全確認">Deploy 前後の安全確認</h2>
+<p><code>aws s3 sync --delete</code>
+は、ローカルに存在しないオブジェクトを S3 から削除します。そのため現在の
+Workflow では、sync 前に <code>frontend/dist</code>
+の存在とファイル数を確認しています。</p>
+<p>Deploy 後も <code>list-objects-v2</code>
+でオブジェクトが存在することを確認します。</p>
+<h2 id="deploy-後は-cloudfront-invalidation">Deploy 後は CloudFront
+Invalidation</h2>
+<div class="sourceCode" id="cb79"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb79-1"><a href="#cb79-1" aria-hidden="true" tabindex="-1"></a><span class="ex">aws</span> cloudfront create-invalidation <span class="dt">\</span></span>
+<span id="cb79-2"><a href="#cb79-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--distribution-id</span> <span class="st">&quot;</span><span class="va">$CLOUDFRONT_DISTRIBUTION_ID</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb79-3"><a href="#cb79-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--paths</span> <span class="st">&quot;/*&quot;</span></span></code></pre></div>
+<p>S3 への同期後に CloudFront のキャッシュを無効化して、新しい Frontend
+を反映します。この処理を行う IAM Role には
+<code>cloudfront:CreateInvalidation</code> が必要です。</p>
+<h1 id="14-pr-check-の設計">14. PR Check の設計</h1>
+<p>Deploy 前に PR で壊れたコードを止めるため、PR Workflow は Deploy
+と分離しました。</p>
+<pre class="text"><code>.github/workflows/
+├── backend-pr-check.yml
+└── frontend-pr-check.yml</code></pre>
+<h2 id="backend-check">Backend Check</h2>
+<p>Job name:</p>
+<pre class="text"><code>Backend Check</code></pre>
+<p>実行内容:</p>
+<pre class="text"><code>Checkout
+  |
+Python 3.13
+  |
+SAM CLI
+  |
+sam validate --lint
+  |
+sam build</code></pre>
+<p>Deploy はしないため AWS OIDC は不要です。</p>
+<h2 id="frontend-check">Frontend Check</h2>
+<p>Job name:</p>
+<pre class="text"><code>Frontend Check</code></pre>
+<p>実行内容:</p>
+<pre class="text"><code>npm ci
+  |
+Unit Test --------+
+                  |
+Type Check/Build -+
+                  |
+                  v
+         最終結果をまとめて判定</code></pre>
+<p>Test と Build に <code>continue-on-error: true</code>
+を使い、どちらか 1 つで即時終了せず、1 回の CI
+で複数の問題を見つけられるようにしています。</p>
+<p>Test result は Artifact に保存します。</p>
+<h2 id="実際に-pr-check-で見つかった問題">実際に PR Check
+で見つかった問題</h2>
+<p>今回の構築途中でも、PR Check が実際に次の問題を検出しました。</p>
+<ul>
+<li><code>package.json</code> と <code>package-lock.json</code>
+の不整合で <code>npm ci</code> が失敗</li>
+<li>Axios 導入後の Unit Test / mock の不整合</li>
+<li>TypeScript 設定の deprecated option による Build failure</li>
+</ul>
+<p>これは「CI が邪魔をした」のではなく、<strong>merge
+前に問題を検出するという本来の目的を果たした</strong>例です。</p>
+<hr />
+<h1 id="15-github-actions-の配置場所でハマった問題">15. GitHub Actions
+の配置場所でハマった問題</h1>
+<p>当初 Workflow ファイルを次に置いていました。</p>
+<pre class="text"><code>.github/backend-pr-check.yml
+.github/frontend-pr-check.yml</code></pre>
+<p>この状態では GitHub Actions の Workflow として認識されません。</p>
+<p>正しい配置:</p>
+<pre class="text"><code>.github/workflows/backend-pr-check.yml
+.github/workflows/frontend-pr-check.yml</code></pre>
+<p>GitHub Actions の Workflow file は <code>.github/workflows/</code>
+配下へ置く必要があります。</p>
+<p>このミスにより Required Check が、</p>
+<pre class="text"><code>Expected - Waiting for status to be reported</code></pre>
+<p>のまま進まない状態になりました。</p>
+<p>実際に全 Workflow を <code>.github/workflows/</code>
+へ移動することで、この問題を解消しました。</p>
+<hr />
+<h1 id="16-github-new-branch-rules--rulesets">16. GitHub New Branch
+Rules / Rulesets</h1>
+<p>今回 Repository では、Rulesets を 2 層に分ける設計にしました。</p>
+<pre class="text"><code>base-branch-protection
+  -&gt; main + dev
+
+main-strict-protection
+  -&gt; main</code></pre>
+<p>複数 Ruleset が同じ branch に適用される場合、GitHub
+はルールを重ねて評価します。そのため main には base と main-strict
+の両方が適用されます。</p>
+<h2 id="必須-status-check">必須 Status Check</h2>
+<p>今回 Required Check として使う Job name は次の 2 つです。</p>
+<pre class="text"><code>Backend Check
+Frontend Check</code></pre>
+<p>PR Workflow 側でも、</p>
+<div class="sourceCode" id="cb90"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb90-1"><a href="#cb90-1" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Backend Check</span></span></code></pre></div>
+<div class="sourceCode" id="cb91"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb91-1"><a href="#cb91-1" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Frontend Check</span></span></code></pre></div>
+<p>と Job name を固定しています。</p>
+<p>Ruleset の Required Status Check で登録する名前と Job name
+がずれると、実際の Workflow が成功していても Ruleset
+が待ち続ける原因になります。</p>
+<h2 id="設定の考え方">設定の考え方</h2>
+<pre class="text"><code>feature/*
+    |
+    +--&gt; PR to dev/main
+             |
+             +--&gt; Backend Check
+             +--&gt; Frontend Check
+             |
+             +--&gt; Required checks pass
+                         |
+                         v
+                       merge</code></pre>
+<p><code>main</code> は本番につながるため、<code>dev</code>
+より厳しいルールを追加できるよう <code>main-strict-protection</code>
+を分離しています。</p>
+<h3 id="bypass">Bypass</h3>
+<p>管理者などの bypass を許可する場合でも、通常の開発フローでは bypass
+を前提にしないことが大切です。緊急時用の逃げ道と通常運用を分けます。</p>
+<hr />
+<h1 id="17-github-environment-と-ruleset-は役割が違う">17. GitHub
+Environment と Ruleset は役割が違う</h1>
+<p>混同しやすいので分けます。</p>
+<h2 id="ruleset">Ruleset</h2>
+<p>「branch へ変更を入れてよいか」を守ります。</p>
+<pre class="text"><code>PR
+  |
+  +--&gt; Review / Required checks
+  |
+  +--&gt; Merge permission</code></pre>
+<h2 id="environment">Environment</h2>
+<p>「どの環境へ Deploy してよいか」を守ります。</p>
+<pre class="text"><code>Deploy Job
+   |
+   +--&gt; branch restriction
+   +--&gt; environment secret
+   +--&gt; approval (optional)
+   |
+   +--&gt; AWS deploy</code></pre>
+<p>両方設定すると、</p>
+<pre class="text"><code>コードを main に入れる gate
++
+prd に deploy する gate</code></pre>
+<p>を分離できます。</p>
+<hr />
+<h1 id="18-concurrency-の考え方">18. Concurrency の考え方</h1>
+<p>Deploy は同じ環境へ同時実行させないようにします。</p>
+<div class="sourceCode" id="cb96"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb96-1"><a href="#cb96-1" aria-hidden="true" tabindex="-1"></a><span class="fu">concurrency</span><span class="kw">:</span></span>
+<span id="cb96-2"><a href="#cb96-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">group</span><span class="kw">:</span><span class="at"> hongo-nba-dashboard-deploy-${{ github.ref == &#39;refs/heads/main&#39; &amp;&amp; &#39;prd&#39; || &#39;dev&#39; }}</span></span>
+<span id="cb96-3"><a href="#cb96-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">cancel-in-progress</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span></code></pre></div>
+<pre class="text"><code>Run A -&gt; dev deploy (running)
+Run B -&gt; dev deploy (waiting)</code></pre>
+<p><code>cancel-in-progress: false</code>
+にしている理由は、CloudFormation / S3
+更新を途中で止めて中途半端な状態にするリスクを避けるためです。</p>
+<p>PR Check は逆で、古い commit の検証結果には価値が低いため、</p>
+<div class="sourceCode" id="cb98"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb98-1"><a href="#cb98-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cancel-in-progress</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
+<p>にします。</p>
+<pre class="text"><code>PR commit A check -&gt; cancel
+PR commit B check -&gt; continue</code></pre>
+<p>用途によって concurrency の意味が異なります。</p>
+<hr />
+<h1 id="19-samconfigtoml-を環境別設定の-source-of-truth-にする">19.
+<code>samconfig.toml</code> を環境別設定の Source of Truth にする</h1>
+<p>現在は
+<code>ResourcePrefix=hongo</code>、<code>ProjectName=nba-dashboard</code>
+を共通とし、<code>dev</code> / <code>prd</code> を
+<code>samconfig.toml</code> で分けます。</p>
+<div class="sourceCode" id="cb100"><pre
+class="sourceCode toml"><code class="sourceCode toml"><span id="cb100-1"><a href="#cb100-1" aria-hidden="true" tabindex="-1"></a><span class="kw">[dev.deploy.parameters]</span></span>
+<span id="cb100-2"><a href="#cb100-2" aria-hidden="true" tabindex="-1"></a><span class="dt">stack_name</span> <span class="op">=</span> <span class="st">&quot;hongo-dev-nba-dashboard&quot;</span></span>
+<span id="cb100-3"><a href="#cb100-3" aria-hidden="true" tabindex="-1"></a><span class="dt">s3_prefix</span> <span class="op">=</span> <span class="st">&quot;hongo-dev-nba-dashboard&quot;</span></span>
+<span id="cb100-4"><a href="#cb100-4" aria-hidden="true" tabindex="-1"></a><span class="dt">region</span> <span class="op">=</span> <span class="st">&quot;ap-northeast-1&quot;</span></span>
+<span id="cb100-5"><a href="#cb100-5" aria-hidden="true" tabindex="-1"></a><span class="dt">capabilities</span> <span class="op">=</span> <span class="st">&quot;CAPABILITY_NAMED_IAM&quot;</span></span>
+<span id="cb100-6"><a href="#cb100-6" aria-hidden="true" tabindex="-1"></a><span class="dt">parameter_overrides</span> <span class="op">=</span> <span class="st">&quot;ParameterKey=ResourcePrefix,ParameterValue=hongo ParameterKey=Environment,ParameterValue=dev ParameterKey=ProjectName,ParameterValue=nba-dashboard ParameterKey=NbaCurrentSeason,ParameterValue=2025-26&quot;</span></span>
+<span id="cb100-7"><a href="#cb100-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb100-8"><a href="#cb100-8" aria-hidden="true" tabindex="-1"></a><span class="kw">[prd.deploy.parameters]</span></span>
+<span id="cb100-9"><a href="#cb100-9" aria-hidden="true" tabindex="-1"></a><span class="dt">stack_name</span> <span class="op">=</span> <span class="st">&quot;hongo-prd-nba-dashboard&quot;</span></span>
+<span id="cb100-10"><a href="#cb100-10" aria-hidden="true" tabindex="-1"></a><span class="dt">s3_prefix</span> <span class="op">=</span> <span class="st">&quot;hongo-prd-nba-dashboard&quot;</span></span>
+<span id="cb100-11"><a href="#cb100-11" aria-hidden="true" tabindex="-1"></a><span class="dt">region</span> <span class="op">=</span> <span class="st">&quot;ap-northeast-1&quot;</span></span>
+<span id="cb100-12"><a href="#cb100-12" aria-hidden="true" tabindex="-1"></a><span class="dt">capabilities</span> <span class="op">=</span> <span class="st">&quot;CAPABILITY_NAMED_IAM&quot;</span></span>
+<span id="cb100-13"><a href="#cb100-13" aria-hidden="true" tabindex="-1"></a><span class="dt">parameter_overrides</span> <span class="op">=</span> <span class="st">&quot;ParameterKey=ResourcePrefix,ParameterValue=hongo ParameterKey=Environment,ParameterValue=prd ParameterKey=ProjectName,ParameterValue=nba-dashboard ParameterKey=NbaCurrentSeason,ParameterValue=2025-26&quot;</span></span></code></pre></div>
+<p>Deploy は Orchestrator の <code>target_environment</code> をそのまま
+<code>--config-env</code> へ渡します。</p>
+<div class="sourceCode" id="cb101"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb101-1"><a href="#cb101-1" aria-hidden="true" tabindex="-1"></a><span class="ex">sam</span> deploy <span class="dt">\</span></span>
+<span id="cb101-2"><a href="#cb101-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--config-file</span> samconfig.toml <span class="dt">\</span></span>
+<span id="cb101-3"><a href="#cb101-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--config-env</span> <span class="st">&quot;</span><span class="va">$TARGET_ENVIRONMENT</span><span class="st">&quot;</span></span></code></pre></div>
+<p>Stack Name を GitHub Variable にコピーしません。</p>
+<p>Backend Workflow が必要なときは Python 3.13 の <code>tomllib</code>
+で <code>samconfig.toml</code> を読みます。</p>
+<div class="sourceCode" id="cb102"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb102-1"><a href="#cb102-1" aria-hidden="true" tabindex="-1"></a>stack_name <span class="op">=</span> config[target][<span class="st">&quot;deploy&quot;</span>][<span class="st">&quot;parameters&quot;</span>][<span class="st">&quot;stack_name&quot;</span>]</span></code></pre></div>
+<p>このため、Stack Name / SAM Parameter の管理場所を
+<code>samconfig.toml</code> に寄せられます。</p>
+<p>また <code>resolve_s3 = true</code> で SAM Deploy 用 Artifact Bucket
+を SAM CLI に解決させています。これは Frontend Hosting 用 S3 Bucket
+とは別物です。</p>
+<h1 id="20-最終設定チェックリスト--別プロジェクトへの横展開">20.
+最終設定チェックリスト / 別プロジェクトへの横展開</h1>
+<p>この章は、旧「最終 GitHub
+設定チェックリスト」と「別プロジェクトへ流用するときに変更する場所」を統合したものです。</p>
+<table>
+<thead>
+<tr class="header">
+<th>分類</th>
+<th><code>nba-dashboard</code> の現在値 / 方針</th>
+<th>別プロジェクトで確認・変更するもの</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Repository</td>
+<td><code>frontend/</code>, <code>backend/</code>,
+<code>.github/workflows/</code></td>
+<td>ディレクトリ構成、Workflow path</td>
+</tr>
+<tr class="even">
+<td>Branch</td>
+<td><code>dev</code>, <code>main</code>, <code>feature/*</code></td>
+<td>Branch 名、PR の向き先</td>
+</tr>
+<tr class="odd">
+<td>Environment</td>
+<td><code>dev</code>, <code>prd</code></td>
+<td>Environment 名、Deployment branch</td>
+</tr>
+<tr class="even">
+<td>Deploy</td>
+<td><code>dev -&gt; dev</code>, <code>main -&gt; prd</code></td>
+<td>Branch と Environment の対応</td>
+</tr>
+<tr class="odd">
+<td>Required Check</td>
+<td><code>Backend Check</code>, <code>Frontend Check</code></td>
+<td>Job name と Ruleset 登録名を一致させる</td>
+</tr>
+<tr class="even">
+<td>Ruleset</td>
+<td><code>base-branch-protection</code> /
+<code>main-strict-protection</code></td>
+<td>対象 branch、Review、Bypass 方針</td>
+</tr>
+<tr class="odd">
+<td>Environment Secret</td>
+<td><code>AWS_ROLE_ARN</code>, <code>ENV_FILE</code></td>
+<td>Role ARN、Frontend 静的設定</td>
+</tr>
+<tr class="even">
+<td>Environment Variable</td>
+<td><code>AWS_REGION</code>, <code>AWS_ACCOUNT_ID</code></td>
+<td>Region、Account ID</td>
+</tr>
+<tr class="odd">
+<td>SAM</td>
+<td><code>ResourcePrefix=hongo</code>,
+<code>ProjectName=nba-dashboard</code>, <code>samconfig.toml</code>
+を環境別設定の Source of Truth にする</td>
+<td><code>ResourcePrefix</code>, <code>ProjectName</code>,
+<code>stack_name</code>, <code>s3_prefix</code>,
+<code>parameter_overrides</code></td>
+</tr>
+<tr class="even">
+<td>CloudFormation Outputs</td>
+<td><code>ApiEndpoint</code>, <code>FrontendBucketName</code>,
+<code>CloudFrontDistributionId</code></td>
+<td>Frontend が必要とする契約値</td>
+</tr>
+<tr class="odd">
+<td>Frontend</td>
+<td><code>__API_ENDPOINT__</code> を Deploy
+時に置換し、<code>frontend/dist/</code> を S3 Bucket root へ同期</td>
+<td>環境変数名、Build script、Node version、Test command、S3
+配置方式</td>
+</tr>
+<tr class="even">
+<td>AWS OIDC</td>
+<td><code>token.actions.githubusercontent.com</code>, audience
+<code>sts.amazonaws.com</code></td>
+<td>Provider、Trust Policy <code>sub</code>、Permission Policy</td>
+</tr>
+<tr class="odd">
+<td>IAM</td>
+<td>学習・検証段階では広めの権限を使用</td>
+<td>本番では必要最小限へ絞る</td>
+</tr>
+</tbody>
+</table>
+<h2 id="repository-files">Repository files</h2>
+<pre class="text"><code>.github/workflows/
+├── backend-pr-check.yml
+├── frontend-pr-check.yml
+├── deploy.yml
+├── deploy-backend.yml
+└── deploy-frontend.yml</code></pre>
+<h2 id="environment-dev--prd">Environment: dev / prd</h2>
+<pre class="text"><code>dev
+├── Secrets
+│   ├── AWS_ROLE_ARN
+│   └── ENV_FILE
+└── Variables
+    ├── AWS_REGION
+    └── AWS_ACCOUNT_ID
+
+prd
+├── Secrets
+│   ├── AWS_ROLE_ARN
+│   └── ENV_FILE
+└── Variables
+    ├── AWS_REGION
+    └── AWS_ACCOUNT_ID</code></pre>
+<p>推奨 Deployment branch:</p>
+<pre class="text"><code>dev -&gt; dev
+prd -&gt; main</code></pre>
+<h2 id="rulesets">Rulesets</h2>
+<pre class="text"><code>base-branch-protection
+  target: main, dev
+
+main-strict-protection
+  target: main</code></pre>
+<p>Required checks:</p>
+<pre class="text"><code>Backend Check
+Frontend Check</code></pre>
+<h2 id="aws-iam--oidc">AWS IAM / OIDC</h2>
+<p>OIDC Provider:</p>
+<pre class="text"><code>https://token.actions.githubusercontent.com</code></pre>
+<p>Audience:</p>
+<pre class="text"><code>sts.amazonaws.com</code></pre>
+<p>Trust Policy では次を確認します。</p>
+<ul>
+<li>GitHub OIDC Provider を Federated Principal にする</li>
+<li><code>sts:AssumeRoleWithWebIdentity</code> を許可する</li>
+<li><code>aud</code> を <code>sts.amazonaws.com</code> に制限する</li>
+<li><code>sub</code> を owner / repository / environment
+方針に合わせて制限する</li>
+<li>2026-07-15 以降に作成・rename・transfer された GitHub.com Repository
+では immutable subject format を確認する</li>
+</ul>
+<h2 id="横展開するときの確認順">横展開するときの確認順</h2>
+<pre class="text"><code>1. Repository / Branch 構成
+2. PR Check / Ruleset
+3. GitHub Environment
+4. samconfig.toml / CloudFormation Outputs
+5. Frontend ENV_FILE / Build script
+6. AWS OIDC Trust Policy
+7. IAM Permission Policy
+8. Deploy を実行して Outputs / S3 / CloudFront / API を確認</code></pre>
+<p><strong>Workflow をそのままコピーすることより、値の Source of Truth
+と権限境界を新しい案件に合わせることを優先します。</strong></p>
+<hr />
+<h1 id="21-最終-deployyml-の要点">21. 最終 <code>deploy.yml</code>
+の要点</h1>
+<p>以下はパターンを理解するための縮約版です。</p>
+<div class="sourceCode" id="cb111"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb111-1"><a href="#cb111-1" aria-hidden="true" tabindex="-1"></a><span class="fu">name</span><span class="kw">:</span><span class="at"> Deploy</span></span>
+<span id="cb111-2"><a href="#cb111-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb111-3"><a href="#cb111-3" aria-hidden="true" tabindex="-1"></a><span class="fu">on</span><span class="kw">:</span></span>
+<span id="cb111-4"><a href="#cb111-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">push</span><span class="kw">:</span></span>
+<span id="cb111-5"><a href="#cb111-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">branches</span><span class="kw">:</span></span>
+<span id="cb111-6"><a href="#cb111-6" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> main</span></span>
+<span id="cb111-7"><a href="#cb111-7" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> dev</span></span>
+<span id="cb111-8"><a href="#cb111-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">paths</span><span class="kw">:</span></span>
+<span id="cb111-9"><a href="#cb111-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&#39;backend/**&#39;</span></span>
+<span id="cb111-10"><a href="#cb111-10" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&#39;frontend/**&#39;</span></span>
+<span id="cb111-11"><a href="#cb111-11" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="st">&#39;.github/workflows/deploy*.yml&#39;</span></span>
+<span id="cb111-12"><a href="#cb111-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb111-13"><a href="#cb111-13" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">workflow_dispatch</span><span class="kw">:</span></span>
+<span id="cb111-14"><a href="#cb111-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">inputs</span><span class="kw">:</span></span>
+<span id="cb111-15"><a href="#cb111-15" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">skip_test</span><span class="kw">:</span></span>
+<span id="cb111-16"><a href="#cb111-16" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">type</span><span class="kw">:</span><span class="at"> boolean</span></span>
+<span id="cb111-17"><a href="#cb111-17" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">default</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
+<span id="cb111-18"><a href="#cb111-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb111-19"><a href="#cb111-19" aria-hidden="true" tabindex="-1"></a><span class="fu">concurrency</span><span class="kw">:</span></span>
+<span id="cb111-20"><a href="#cb111-20" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">group</span><span class="kw">:</span><span class="at"> app-deploy-${{ github.ref == &#39;refs/heads/main&#39; &amp;&amp; &#39;prd&#39; || &#39;dev&#39; }}</span></span>
+<span id="cb111-21"><a href="#cb111-21" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">cancel-in-progress</span><span class="kw">:</span><span class="at"> </span><span class="ch">false</span></span>
+<span id="cb111-22"><a href="#cb111-22" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb111-23"><a href="#cb111-23" aria-hidden="true" tabindex="-1"></a><span class="fu">permissions</span><span class="kw">:</span><span class="at"> </span><span class="kw">{}</span></span>
+<span id="cb111-24"><a href="#cb111-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb111-25"><a href="#cb111-25" aria-hidden="true" tabindex="-1"></a><span class="fu">jobs</span><span class="kw">:</span></span>
+<span id="cb111-26"><a href="#cb111-26" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">prepare</span><span class="kw">:</span></span>
+<span id="cb111-27"><a href="#cb111-27" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">runs-on</span><span class="kw">:</span><span class="at"> ubuntu-latest</span></span>
+<span id="cb111-28"><a href="#cb111-28" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">outputs</span><span class="kw">:</span></span>
+<span id="cb111-29"><a href="#cb111-29" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">target_environment</span><span class="kw">:</span><span class="at"> ${{ steps.resolve.outputs.target_environment }}</span></span>
+<span id="cb111-30"><a href="#cb111-30" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">steps</span><span class="kw">:</span></span>
+<span id="cb111-31"><a href="#cb111-31" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> </span><span class="fu">id</span><span class="kw">:</span><span class="at"> resolve</span></span>
+<span id="cb111-32"><a href="#cb111-32" aria-hidden="true" tabindex="-1"></a><span class="fu">        run</span><span class="kw">: </span><span class="ch">|</span></span>
+<span id="cb111-33"><a href="#cb111-33" aria-hidden="true" tabindex="-1"></a>          case &quot;$GITHUB_REF_NAME&quot; in</span>
+<span id="cb111-34"><a href="#cb111-34" aria-hidden="true" tabindex="-1"></a>            main) echo &quot;target_environment=prd&quot; &gt;&gt; &quot;$GITHUB_OUTPUT&quot; ;;</span>
+<span id="cb111-35"><a href="#cb111-35" aria-hidden="true" tabindex="-1"></a>            dev)  echo &quot;target_environment=dev&quot; &gt;&gt; &quot;$GITHUB_OUTPUT&quot; ;;</span>
+<span id="cb111-36"><a href="#cb111-36" aria-hidden="true" tabindex="-1"></a>            *) exit 1 ;;</span>
+<span id="cb111-37"><a href="#cb111-37" aria-hidden="true" tabindex="-1"></a>          esac</span>
+<span id="cb111-38"><a href="#cb111-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb111-39"><a href="#cb111-39" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">backend</span><span class="kw">:</span></span>
+<span id="cb111-40"><a href="#cb111-40" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">needs</span><span class="kw">:</span></span>
+<span id="cb111-41"><a href="#cb111-41" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> prepare</span></span>
+<span id="cb111-42"><a href="#cb111-42" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">permissions</span><span class="kw">:</span></span>
+<span id="cb111-43"><a href="#cb111-43" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">contents</span><span class="kw">:</span><span class="at"> read</span></span>
+<span id="cb111-44"><a href="#cb111-44" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">id-token</span><span class="kw">:</span><span class="at"> write</span></span>
+<span id="cb111-45"><a href="#cb111-45" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> ./.github/workflows/deploy-backend.yml</span></span>
+<span id="cb111-46"><a href="#cb111-46" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">secrets</span><span class="kw">:</span><span class="at"> inherit</span></span>
+<span id="cb111-47"><a href="#cb111-47" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">with</span><span class="kw">:</span></span>
+<span id="cb111-48"><a href="#cb111-48" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">target_environment</span><span class="kw">:</span><span class="at"> ${{ needs.prepare.outputs.target_environment }}</span></span>
+<span id="cb111-49"><a href="#cb111-49" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb111-50"><a href="#cb111-50" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">frontend</span><span class="kw">:</span></span>
+<span id="cb111-51"><a href="#cb111-51" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">needs</span><span class="kw">:</span></span>
+<span id="cb111-52"><a href="#cb111-52" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> prepare</span></span>
+<span id="cb111-53"><a href="#cb111-53" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="kw">-</span><span class="at"> backend</span></span>
+<span id="cb111-54"><a href="#cb111-54" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">permissions</span><span class="kw">:</span></span>
+<span id="cb111-55"><a href="#cb111-55" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">contents</span><span class="kw">:</span><span class="at"> read</span></span>
+<span id="cb111-56"><a href="#cb111-56" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">id-token</span><span class="kw">:</span><span class="at"> write</span></span>
+<span id="cb111-57"><a href="#cb111-57" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">uses</span><span class="kw">:</span><span class="at"> ./.github/workflows/deploy-frontend.yml</span></span>
+<span id="cb111-58"><a href="#cb111-58" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">secrets</span><span class="kw">:</span><span class="at"> inherit</span></span>
+<span id="cb111-59"><a href="#cb111-59" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">with</span><span class="kw">:</span></span>
+<span id="cb111-60"><a href="#cb111-60" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">target_environment</span><span class="kw">:</span><span class="at"> ${{ needs.prepare.outputs.target_environment }}</span></span>
+<span id="cb111-61"><a href="#cb111-61" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">api_endpoint</span><span class="kw">:</span><span class="at"> ${{ needs.backend.outputs.api_endpoint }}</span></span>
+<span id="cb111-62"><a href="#cb111-62" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">frontend_bucket_name</span><span class="kw">:</span><span class="at"> ${{ needs.backend.outputs.frontend_bucket_name }}</span></span>
+<span id="cb111-63"><a href="#cb111-63" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">cloudfront_distribution_id</span><span class="kw">:</span><span class="at"> ${{ needs.backend.outputs.cloudfront_distribution_id }}</span></span></code></pre></div>
+<p>ポイントは、</p>
+<pre class="text"><code>Trigger / Branch 判定 / 順序 -&gt; deploy.yml
+SAM                        -&gt; deploy-backend.yml
+Frontend                   -&gt; deploy-frontend.yml</code></pre>
+<p>と責務を分けることです。</p>
+<hr />
+<h1 id="22-トラブルシューティングプレイブック">22.
+トラブルシューティング・プレイブック</h1>
+<h2
+id="症状-required-check-が-expected---waiting-for-status-to-be-reported">症状:
+Required Check が
+<code>Expected - Waiting for status to be reported</code></h2>
+<p>確認順:</p>
+<pre class="text"><code>1. Workflow file は .github/workflows/ 配下か
+2. on.pull_request の target branch は正しいか
+3. paths filter で Workflow 自体が skip されていないか
+4. Ruleset に登録した check name と Job name が一致しているか</code></pre>
+<p>今回の主原因:</p>
+<pre class="text"><code>.github/*.yml に置いていた</code></pre>
+<p>修正:</p>
+<pre class="text"><code>.github/workflows/*.yml</code></pre>
+<hr />
+<h2 id="症状-aws_role_arn-is-not-configured">症状:
+<code>AWS_ROLE_ARN is not configured</code></h2>
+<p>まず Secret の中身を表示せず存在確認します。</p>
+<pre class="text"><code>通常 environment Job で yes?
+  |
+  +-- no  -&gt; Environment 設定側
+  |
+  +-- yes -&gt; reusable workflow 境界を確認</code></pre>
+<p>今回の解決:</p>
+<div class="sourceCode" id="cb117"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb117-1"><a href="#cb117-1" aria-hidden="true" tabindex="-1"></a><span class="fu">secrets</span><span class="kw">:</span><span class="at"> inherit</span></span></code></pre></div>
+<p>を caller の reusable workflow call Job に追加。</p>
+<hr />
+<h2
+id="症状-not-authorized-to-perform-stsassumerolewithwebidentity">症状:
+<code>Not authorized to perform sts:AssumeRoleWithWebIdentity</code></h2>
+<p>これは通常の AWS Permission 不足より前の問題です。</p>
+<pre class="text"><code>AWS_ROLE_ARN 取得
+    |
+OIDC token
+    |
+AWS STS
+    X
+Trust Policy mismatch</code></pre>
+<p>確認:</p>
+<pre class="text"><code>Principal Federated
+Action sts:AssumeRoleWithWebIdentity
+aud
+sub
+GitHub immutable subject format</code></pre>
+<p><code>AdministratorAccess</code> の有無だけを見ないこと。</p>
+<hr />
+<h2 id="症状-unable-to-upload-artifact-frontendapilayer">症状:
+<code>Unable to upload artifact FrontendApiLayer</code></h2>
+<p>確認:</p>
+<pre class="text"><code>ContentUri の path
+実 directory の path
+大文字 / 小文字
+sam build の artifact</code></pre>
+<p>今回:</p>
+<pre class="text"><code>Layer/ -&gt; layer/</code></pre>
+<hr />
+<h2 id="症状-npm-ci-failure">症状: <code>npm ci</code> failure</h2>
+<p>確認:</p>
+<pre class="text"><code>package.json
+package-lock.json</code></pre>
+<p>依存追加後に lock file を更新していないと CI が止まります。</p>
+<hr />
+<h2 id="症状-unit-test--build-failure">症状: Unit Test / Build
+failure</h2>
+<p><code>continue-on-error</code> を使っている場合、最後の結果判定 Step
+を確認します。</p>
+<p>今回、テストと Build の両方を実行してから最終 failure
+にする構成にしたことで、1 回の CI で複数問題を確認できました。</p>
+<hr />
+<h1 id="23-構築の時系列と最終的に残った学び">23.
+構築の時系列と、最終的に残った学び</h1>
+<p>Git
+履歴と実際のトラブルシュートを合わせると、大きな流れは次のとおりです。</p>
+<table>
+<thead>
+<tr class="header">
+<th>時点</th>
+<th>内容</th>
+<th>学び</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>初期</td>
+<td>Frontend / Backend 独立 Deploy</td>
+<td>単独では分かりやすいが依存順序を表現できない</td>
+</tr>
+<tr class="even">
+<td>設計変更</td>
+<td>Orchestrator + reusable workflow</td>
+<td>Deploy の入口と実処理を分離</td>
+</tr>
+<tr class="odd">
+<td>設計変更</td>
+<td>feature deploy を廃止</td>
+<td>shared dev environment の上書きを防ぐ</td>
+</tr>
+<tr class="even">
+<td>Rulesets / PR Check</td>
+<td>main/dev を保護</td>
+<td>merge 前に Build / Test 問題を止める</td>
+</tr>
+<tr class="odd">
+<td>配置修正</td>
+<td><code>.github/</code> -&gt; <code>.github/workflows/</code></td>
+<td>Workflow discovery の基本</td>
+</tr>
+<tr class="even">
+<td>Frontend CI</td>
+<td>lock/test/TypeScript の問題発見</td>
+<td>CI が品質 gate として機能</td>
+</tr>
+<tr class="odd">
+<td>CFN Outputs</td>
+<td>API/S3/CloudFront を output 化</td>
+<td>手入力・二重管理を減らす</td>
+</tr>
+<tr class="even">
+<td>Bootstrap 解消</td>
+<td><code>__API_ENDPOINT__</code></td>
+<td>初回 Deploy を 1 Run で成立させる</td>
+</tr>
+<tr class="odd">
+<td>Secret Debug</td>
+<td>vars OK / secrets NG</td>
+<td>Environment と reusable workflow の境界を切り分ける</td>
+</tr>
+<tr class="even">
+<td>Secret Fix</td>
+<td><code>secrets: inherit</code> を採用</td>
+<td>今回の Repository ではこの構成で問題が解消</td>
+</tr>
+<tr class="odd">
+<td>OIDC Error</td>
+<td>AssumeRoleWithWebIdentity failure</td>
+<td>Permission と Trust を分けて考える</td>
+</tr>
+<tr class="even">
+<td>OIDC Fix</td>
+<td>immutable subject に Trust を対応</td>
+<td>2026 GitHub OIDC 変更へ追従</td>
+</tr>
+<tr class="odd">
+<td>SAM Error</td>
+<td>Layer artifact missing</td>
+<td>Linux の path case sensitivity</td>
+</tr>
+<tr class="even">
+<td>SAM Fix</td>
+<td><code>Layer/</code> -&gt; <code>layer/</code></td>
+<td>Build artifact は Git 管理しない</td>
+</tr>
+<tr class="odd">
+<td>完了</td>
+<td>Backend / Frontend Deploy 成功</td>
+<td>Browser 表示・API Call を確認</td>
+</tr>
+</tbody>
+</table>
+<p>Git 履歴からも、<strong>Workflow 分割 → 配置修正 → Secret
+問題の切り分け → Layer パス修正 → Deploy
+成功</strong>という変更の流れを確認できます。</p>
+<p>その後は DynamoDB、NBA データ取得 Batch、画面・API
+機能などアプリケーション側の拡張が続いていますが、<code>.github/workflows/</code>
+の基本構成は維持されています。</p>
+<p>完成した YAML だけを見ると、次の理由は分かりません。</p>
+<ul>
+<li>なぜ Deploy を 3 Workflow に分けたのか</li>
+<li>なぜ Backend を先に実行するのか</li>
+<li>なぜ API URL / S3 Bucket / CloudFront ID を GitHub Variable
+に持たないのか</li>
+<li>なぜ <code>ENV_FILE</code> にプレースホルダーがあるのか</li>
+<li>なぜ OIDC の Trust Policy で <code>sub</code> が重要なのか</li>
+</ul>
+<p>この資料で残したいのは YAML
+そのものより、<strong>その設計判断と切り分け方</strong>です。</p>
+<p>別プロジェクトでは、次の順に設計すると流用しやすくなります。</p>
+<pre class="text"><code>Repository構成
+  -&gt; Branch戦略
+  -&gt; PR Gate
+  -&gt; Environment
+  -&gt; Deploy順序
+  -&gt; Infrastructure Outputs
+  -&gt; Authentication
+  -&gt; Runtime Build
+  -&gt; Deployment</code></pre>
+<hr />
+<h1 id="24-本番適用前-todo--known-issues">24. 本番適用前 TODO / Known
+Issues</h1>
+<p>現在の構成は実際に Deploy
+まで成功しています。ただし、<strong>動くこと</strong>と<strong>本番運用へそのまま持ち込めること</strong>は分けて考えます。</p>
+<h2 id="241-本番適用前に解消する-todo">24.1 本番適用前に解消する
+TODO</h2>
+<h3 id="debug-job-を削除する">Debug Job を削除する</h3>
+<p>トラブルシュート用に追加した <code>debug-environment</code> Job が
+<code>deploy.yml</code> に残っているため、本番適用前に削除します。</p>
+<p>あわせて、同じ箇所に残る古い Secret
+継承コメントも現在の実装に合わせて更新します。</p>
+<h3 id="iam-permission-を最小権限化する">IAM Permission
+を最小権限化する</h3>
+<p>学習・検証段階で <code>AdministratorAccess</code>
+のような広い権限を使っている場合、本番では CloudFormation / Lambda / API
+Gateway / IAM / S3 / CloudFront / DynamoDB / Scheduler など、実際に
+Deploy に必要な操作へ絞ります。</p>
+<p>特に OIDC Trust Policy の対象範囲と Permission Policy
+の強さを両方広くしないことが重要です。</p>
+<h2 id="242-known-issues--将来の改善候補">24.2 Known Issues /
+将来の改善候補</h2>
+<h3 id="action-version-の固定方針">Action version の固定方針</h3>
+<p>Marketplace Action を major tag で追従するか、commit SHA で pin
+するかをチーム方針として決めます。</p>
+<h3 id="prd-approval">prd approval</h3>
+<p>必要なら <code>prd</code> Environment に Required Reviewer
+を設定します。Backend と Frontend の両方が Environment
+を参照するため、承認回数・再実行時の UX を実際の Workflow
+で確認して運用ルールを決めます。</p>
+<h3 id="deploy-の-path-最適化">Deploy の path 最適化</h3>
+<p>現在は Frontend-only change でも Backend の empty changeset
+を通します。デプロイ時間が問題になった場合のみ、変更ファイルによる skip
+を検討します。</p>
+<p>Backend を skip する場合は、Frontend が必要とする CloudFormation
+Outputs
+をどこから取得するかという別の設計が必要になるため、単純さを失ってまで早期最適化しません。</p>
+<hr />
+<h1 id="25-最終的な設計原則">25. 最終的な設計原則</h1>
+<p>今回の構築で最終的に残った考え方を短くまとめると、次です。</p>
+<h3 id="1-deploy-の入口は-1-つにする">1. Deploy の入口は 1 つにする</h3>
+<pre class="text"><code>deploy.yml</code></pre>
+<p>が branch / environment / order を決める。</p>
+<h3 id="2-実処理は責務で分ける">2. 実処理は責務で分ける</h3>
+<pre class="text"><code>deploy-backend.yml
+deploy-frontend.yml</code></pre>
+<h3 id="3-backend-を先にする">3. Backend を先にする</h3>
+<p>Frontend は Backend が作る値に依存するため。</p>
+<h3 id="4-aws-が作った値は-aws-から取る">4. AWS が作った値は AWS
+から取る</h3>
+<pre class="text"><code>CloudFormation Outputs</code></pre>
+<p>を使い、GitHub への手入力を減らす。</p>
+<h3 id="5-environment-は設定とデプロイ境界に使う">5. Environment
+は設定とデプロイ境界に使う</h3>
+<pre class="text"><code>dev / prd</code></pre>
+<h3 id="6-secret--environment-のスコープを明示する">6. Secret /
+Environment のスコープを明示する</h3>
+<p>今回の構成では caller に <code>secrets: inherit</code> を置き、called
+workflow の Deploy Job では <code>environment: dev / prd</code>
+を適用しています。<code>secrets: inherit</code> と Environment Secret
+は同じ仕組みではないため、用途を分けて理解します。</p>
+<h3 id="7-aws-認証は-oidc">7. AWS 認証は OIDC</h3>
+<p>固定 Access Key を GitHub に保存しない。</p>
+<h3 id="8-iam-は-permission-と-trust-を分けて考える">8. IAM は
+Permission と Trust を分けて考える</h3>
+<p><code>AdministratorAccess</code> でも Trust が間違えば AssumeRole
+できない。</p>
+<h3 id="9-build-artifact-は-git-管理しない">9. Build artifact は Git
+管理しない</h3>
+<pre class="text"><code>requirements.txt -&gt; sam build -&gt; artifact</code></pre>
+<h3 id="10-pr-check-と-deploy-は分ける">10. PR Check と Deploy
+は分ける</h3>
+<pre class="text"><code>merge 前の品質 gate
+!=
+AWS への deployment</code></pre>
+<hr />
+<h1 id="26-参考-公式ドキュメント">26. 参考: 公式ドキュメント</h1>
+<p>本資料の仕様確認に使用した公式情報です。GitHub Actions / AWS
+は継続的に更新されるため、別プロジェクトへ展開するときは最新ドキュメントも確認してください。</p>
+<h2 id="github-actions">GitHub Actions</h2>
+<ul>
+<li><p>GitHub Actions workflow files
+(<code>.github/workflows</code>)<br />
+<a
+href="https://docs.github.com/en/actions/get-started/quickstart">https://docs.github.com/en/actions/get-started/quickstart</a></p></li>
+<li><p>Reusing workflows / <code>secrets: inherit</code><br />
+<a
+href="https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows">https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows</a></p></li>
+<li><p>Workflow syntax / <code>permissions</code><br />
+<a
+href="https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax">https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax</a></p></li>
+<li><p>Environments / Environment secrets / variables<br />
+<a
+href="https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments">https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments</a></p></li>
+<li><p>Rulesets<br />
+<a
+href="https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets">https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets</a></p></li>
+<li><p>Required status checks<br />
+<a
+href="https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets">https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets</a></p></li>
+<li><p>Troubleshooting required checks<br />
+<a
+href="https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks">https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks</a></p></li>
+<li><p>GitHub Actions OIDC reference / immutable subject claims<br />
+<a
+href="https://docs.github.com/en/actions/reference/security/oidc">https://docs.github.com/en/actions/reference/security/oidc</a></p></li>
+<li><p>GitHub OIDC with AWS<br />
+<a
+href="https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws">https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws</a></p></li>
+<li><p>GitHub Changelog: immutable OIDC subject claims<br />
+<a
+href="https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/">https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/</a></p></li>
+</ul>
+<h2 id="vite">Vite</h2>
+<ul>
+<li>Env Variables and Modes / Protecting secrets<br />
+<a
+href="https://vite.dev/guide/env-and-mode">https://vite.dev/guide/env-and-mode</a></li>
+</ul>
+<h2 id="aws">AWS</h2>
+<ul>
+<li><p>Create IAM role for OIDC federation<br />
+<a
+href="https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html">https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp_oidc.html</a></p></li>
+<li><p>AWS SAM: Building Lambda layers<br />
+<a
+href="https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/building-layers.html">https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/building-layers.html</a></p></li>
+<li><p>AWS SAM: <code>sam build</code><br />
+<a
+href="https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-using-build.html">https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-using-build.html</a></p></li>
+<li><p>AWS SAM: Deploy<br />
+<a
+href="https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/using-sam-cli-deploy.html">https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/using-sam-cli-deploy.html</a></p></li>
+</ul>
+<hr />
+</body>
+</html>

@@ -1,0 +1,38 @@
+{
+  "name": "nba-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "build-only": "vite build",
+    "build-only:dev": "vite build --mode dev",
+    "build-only:prd": "vite build --mode prd",
+    "preview": "vite preview",
+    "test": "vitest run --reporter=verbose --reporter=junit --reporter=github-actions --outputFile=test-results.xml",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "vue": "^3.5.34",
+    "vue-router": "^5.0.7",
+    "pinia": "^3.0.4",
+    "dayjs": "^1.11.21",
+    "element-plus": "^2.14.0",
+    "@element-plus/icons-vue": "^2.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.4.10",
+    "@vue/tsconfig": "^0.9.1",
+    "@vitest/coverage-v8": "^4.1.7",
+    "happy-dom": "^20.9.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7",
+    "vue-tsc": "^3.3.2"
+  }
+}

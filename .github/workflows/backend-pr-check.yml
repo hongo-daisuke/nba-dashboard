@@ -1,0 +1,232 @@
+# ============================================================
+# Pull Request 作成・更新時に、フロントエンドとバックエンドを
+# 自動検証するためのワークフロー
+#
+# このファイルでは、PR を merge する前に
+# 「ビルドできるか」「テストが通るか」「SAM テンプレートが正しいか」
+# を確認する。
+#
+# 主な役割:
+#
+# - main / dev 向け Pull Request の自動チェック
+# - 同一 PR に追加 push があった場合、古いチェックをキャンセル
+# - Backend の SAM Validate / SAM Build
+# - Frontend の Unit Test / Type Check / Build
+# - テスト失敗時でも Artifact を保存
+# - Test / Build の両方を確認してから最終的な成否を判定
+#
+# Deploy Workflow と異なり、この Workflow 自体は
+# AWS 環境へのデプロイを行わない。
+# ============================================================
+name: Backend PR Check
+
+
+# ============================================================
+# 1. ワークフローの発火条件
+#
+# pull_request:
+#   main または dev をマージ先とする Pull Request に対して実行する。
+#
+# types:
+#   PR の作成・更新・再オープン・レビュー開始時に実行する。
+#
+# opened:
+#   新しい Pull Request が作成されたとき。
+#
+# synchronize:
+#   PR のブランチへ追加 push されたとき。
+#
+# reopened:
+#   Close 済みの PR が再度 Open されたとき。
+#
+# ready_for_review:
+#   Draft PR が Ready for review に変更されたとき。
+#
+# PR のタイトル変更だけでは実行されず、
+# コード変更やレビュー開始など、検証が必要なタイミングに限定する。
+# ============================================================
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+
+# ============================================================
+# 2. 同一 PR のチェックを重複実行させない
+#
+# Pull Request に新しい commit が push された場合、
+# 古い commit に対する CI を最後まで実行しても意味が薄い。
+#
+# group:
+#   PR 番号ごとに同じ concurrency group を使用する。
+#
+# cancel-in-progress: true:
+#   同じ PR に新しい push が来たら、
+#   実行中の古い PR Check をキャンセルし、
+#   最新 commit のチェックだけを継続する。
+#
+# Deploy Workflow では途中キャンセルが危険なため false にしているが、
+# PR Check は「最新コードの検証」が目的なので true が適している。
+# ============================================================
+concurrency:
+  group: backend-pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+
+jobs:
+  # ==========================================================
+  # 3. Backend Check
+  #
+  # backend/ 配下の SAM アプリケーションについて、
+  # template.yaml の静的検証と実際の Build を行う。
+  #
+  # Deploy は行わないため AWS OIDC 認証は不要。
+  # ==========================================================
+  check-backend:
+    name: Backend Check
+
+    # GitHub が用意する Linux Runner 上で実行する。
+    runs-on: ubuntu-latest
+
+    # 異常終了せず処理が止まった場合でも、
+    # 15分でジョブを終了させる。
+    timeout-minutes: 15
+
+    # ========================================================
+    # 4. Backend Job の run 共通設定
+    #
+    # SAM CLI は backend/template.yaml などを参照するため、
+    # run ステップの作業ディレクトリを backend/ に統一する。
+    #
+    # shell: bash:
+    #   shell script を Bash として実行する。
+    # ========================================================
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+
+    # ========================================================
+    # 5. Backend Job の GitHub Token 権限
+    #
+    # PR Check ではリポジトリの読み取りだけが必要。
+    #
+    # contents: read:
+    #   actions/checkout がソースコードを取得するために必要。
+    #
+    # Deploy を行わないため id-token: write は付与しない。
+    # 必要以上の権限を与えない最小権限の構成にする。
+    # ========================================================
+    permissions:
+      contents: read
+
+    steps:
+      # ======================================================
+      # 6. リポジトリを Runner に取得
+      #
+      # GitHub Actions の Runner は毎回新しい環境なので、
+      # 最初に対象 PR のソースコードを checkout する。
+      #
+      # persist-credentials: false:
+      #   この Workflow では git push を行わないため、
+      #   GITHUB_TOKEN を git config に残さない。
+      # ======================================================
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # ======================================================
+      # 7. Pull Request 情報をログへ出力
+      #
+      # 障害調査時に、どの PR / ブランチ / 実行者のチェックかを
+      # Actions のログだけで確認できるようにする。
+      #
+      # PR Title などは外部入力になり得るため、
+      # run: に GitHub Expression を直接埋め込まず env 経由で渡す。
+      # ======================================================
+      - name: Log PR info
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          printf '%s\n' '=== PR Check Start (Backend) ==='
+          printf 'PR Number: %s\n' "$PR_NUMBER"
+          printf 'PR Title : %s\n' "$PR_TITLE"
+          printf 'Branch   : %s -> %s\n' "$HEAD_REF" "$BASE_REF"
+          printf 'Actor    : %s\n' "$ACTOR"
+          printf '%s\n' '================================'
+
+      # ======================================================
+      # 8. Python をセットアップ
+      #
+      # SAM Build / Lambda で利用する Python バージョンを
+      # CI 上にも用意する。
+      #
+      # ローカル環境と CI の Python バージョンを揃えることで、
+      # 環境差による Build エラーを減らせる。
+      # ======================================================
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      # ======================================================
+      # 9. AWS SAM CLI をセットアップ
+      #
+      # SAM CLI は template.yaml の Validate / Build に使用する。
+      #
+      # use-installer: true:
+      #   SAM CLI のネイティブインストーラーを利用する。
+      #
+      # token:
+      #   GitHub API 利用時の rate limit を避けるため、
+      #   GitHub が自動発行する Token を渡す。
+      #
+      # AWS へ Deploy はしないため、
+      # AWS Credential はここでは取得しない。
+      # ======================================================
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+          token: ${{ github.token }}
+
+      # ======================================================
+      # 10. SAM Template の静的検証
+      #
+      # template.yaml の構文や lint エラーを確認する。
+      #
+      # PR の段階で Template の問題を検出することで、
+      # merge 後の Deploy Workflow で初めて失敗することを防ぐ。
+      #
+      # AWS_DEFAULT_REGION:
+      #   SAM Validate が必要とする Region を明示する。
+      # ======================================================
+      - name: SAM Validate
+        env:
+          AWS_DEFAULT_REGION: ap-northeast-1
+        run: sam validate --lint
+
+      # ======================================================
+      # 11. SAM Build
+      #
+      # Validate が通った Template を実際に Build する。
+      #
+      # Validate は通るが Build は失敗するケースもあるため、
+      # merge 前に sam build まで確認しておく。
+      #
+      # ここが失敗した場合、この Backend Check は failure になる。
+      # ======================================================
+      - name: SAM Build
+        run: sam build
+

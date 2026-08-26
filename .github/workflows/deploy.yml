@@ -1,0 +1,270 @@
+# ============================================================
+# dev / prd への Deploy 全体を制御する Orchestrator Workflow
+#
+# この Workflow が Deploy の「唯一の入口」になる。
+#
+# push / workflow_dispatch
+#          │
+#          ▼
+#    target_environment 決定
+#          │
+#          ▼
+#   deploy-backend.yml
+#          │
+#          │ CloudFormation Outputs:
+#          │ - api_endpoint
+#          │ - frontend_bucket_name
+#          │ - cloudfront_distribution_id
+#          ▼
+#  deploy-frontend.yml
+#
+# 主な責務:
+# - Deploy Event の管理
+# - dev / prd の決定
+# - feature/* を Deploy 対象から除外
+# - Deploy 全体の concurrency 管理
+# - Backend -> Frontend の順序保証
+# - Backend Outputs -> Frontend Inputs の配線
+# ============================================================
+
+name: Deploy
+
+# ============================================================
+# 1. Trigger
+#
+# feature/*:
+#   Deploy しない。PR Check のみ。
+#
+# dev:
+#   dev Environment へ Deploy。
+#
+# main:
+#   prd Environment へ Deploy。
+#
+# paths:
+#   README 等だけの変更では Deploy しない。
+#   job-level の複雑な paths-filter はまだ導入しない。
+# ============================================================
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/deploy-backend.yml'
+      - '.github/workflows/deploy-frontend.yml'
+
+  workflow_dispatch:
+    inputs:
+      skip_test:
+        description: 'Frontend unit test をスキップする'
+        required: false
+        default: false
+        type: boolean
+
+# ============================================================
+# 2. Deploy-wide Concurrency
+#
+# Backend / Frontend 個別ではなく、
+# Orchestrator Run 全体を Environment 単位で直列化する。
+# ============================================================
+
+concurrency:
+  group: hongo-nba-dashboard-deploy-${{ github.ref == 'refs/heads/main' && 'prd' || 'dev' }}
+  cancel-in-progress: false
+
+# ============================================================
+# 3. Default Permissions
+#
+# Orchestrator 自身には原則 Permission を与えない。
+# AWS OIDC が必要な reusable workflow call Job だけに
+# contents: read / id-token: write を付与する。
+# ============================================================
+
+permissions: {}
+
+jobs:
+  # ==========================================================
+  # 4. Resolve Deployment Context
+  #
+  # Deploy 先を決める責務は Orchestrator のみ。
+  #
+  # main -> prd
+  # dev  -> dev
+  #
+  # workflow_dispatch で feature branch / tag を選んでも拒否する。
+  # ==========================================================
+
+  prepare:
+    name: Prepare Deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      target_environment: ${{ steps.resolve.outputs.target_environment }}
+
+    steps:
+      - name: Resolve target environment
+        id: resolve
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$REF_TYPE" != "branch" ]]; then
+            echo "::error::Deploy from ref type '${REF_TYPE}' is not allowed."
+            echo "::error::Select the 'dev' or 'main' branch."
+            exit 1
+          fi
+
+          case "$REF_NAME" in
+            main)
+              TARGET_ENVIRONMENT="prd"
+              ;;
+            dev)
+              TARGET_ENVIRONMENT="dev"
+              ;;
+            *)
+              echo "::error::Deploy from branch '${REF_NAME}' is not allowed."
+              echo "::error::Allowed branches are: dev, main"
+              exit 1
+              ;;
+          esac
+
+          echo "Branch: ${REF_NAME}"
+          echo "Target environment: ${TARGET_ENVIRONMENT}"
+          echo "target_environment=${TARGET_ENVIRONMENT}" >> "$GITHUB_OUTPUT"
+
+      - name: Write deployment plan
+        env:
+          TARGET_ENVIRONMENT: ${{ steps.resolve.outputs.target_environment }}
+          SKIP_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_test || false }}
+        run: |
+          set -Eeuo pipefail
+
+          {
+            echo "## Deployment Plan"
+            echo
+            echo "- Event: \`${GITHUB_EVENT_NAME}\`"
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Environment: \`${TARGET_ENVIRONMENT}\`"
+            echo "- Frontend test skip: \`${SKIP_TEST}\`"
+            echo "- Order: \`Backend / Infrastructure -> Frontend\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ==========================================================
+  # ログ (削除します)
+  # ==========================================================
+  debug-environment:
+    name: Debug Environment Secrets
+
+    needs:
+      - prepare
+
+    runs-on: ubuntu-latest
+
+    environment:
+      name: ${{ needs.prepare.outputs.target_environment }}
+
+    steps:
+      - name: Check environment values
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+
+        run: |
+          set -Eeuo pipefail
+
+          echo "AWS_REGION exists: $([[ -n "${AWS_REGION:-}" ]] && echo yes || echo no)"
+          echo "AWS_ACCOUNT_ID exists: $([[ -n "${AWS_ACCOUNT_ID:-}" ]] && echo yes || echo no)"
+          echo "AWS_ROLE_ARN exists: $([[ -n "${AWS_ROLE_ARN:-}" ]] && echo yes || echo no)"
+          echo "ENV_FILE exists: $([[ -n "${ENV_FILE:-}" ]] && echo yes || echo no)"
+  # ==========================================================
+  # ログ (削除します)
+  # ==========================================================
+
+  # ==========================================================
+  # 5. Backend / Infrastructure
+  #
+  # Environment Secrets / Variables は caller から横流ししない。
+  # called workflow 内の Environment Job が直接参照する。
+  #
+  # outputs:
+  # - api_endpoint
+  # - frontend_bucket_name
+  # - cloudfront_distribution_id
+  # ==========================================================
+
+  backend:
+    name: Backend / Infrastructure
+    needs:
+      - prepare
+
+    permissions:
+      contents: read
+      id-token: write
+
+    uses: ./.github/workflows/deploy-backend.yml
+
+    secrets: inherit
+
+    with:
+      target_environment: ${{ needs.prepare.outputs.target_environment }}
+
+  # ==========================================================
+  # 6. Frontend
+  #
+  # needs: backend により Backend -> Frontend の順序を保証する。
+  #
+  # Backend が SAM Deploy 完了後に取得した3つの
+  # CloudFormation Outputs を Frontend へ渡す。
+  #
+  # これにより初回 AWS が空でも、
+  #
+  # Infrastructure 作成
+  #      ↓
+  # API Endpoint / S3 / CloudFront 確定
+  #      ↓
+  # Frontend .env 生成 / Build / Deploy
+  #
+  # の順で1 Run内に完結する。
+  # ==========================================================
+
+  frontend:
+    name: Frontend
+
+    needs:
+      - prepare
+      - backend
+
+    permissions:
+      contents: read
+      id-token: write
+
+    uses: ./.github/workflows/deploy-frontend.yml
+
+    secrets: inherit
+
+    with:
+      target_environment: ${{ needs.prepare.outputs.target_environment }}
+
+      api_endpoint: >-
+        ${{ needs.backend.outputs.api_endpoint }}
+
+      frontend_bucket_name: >-
+        ${{ needs.backend.outputs.frontend_bucket_name }}
+
+      cloudfront_distribution_id: >-
+        ${{ needs.backend.outputs.cloudfront_distribution_id }}
+
+      skip_test: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.skip_test || false }}

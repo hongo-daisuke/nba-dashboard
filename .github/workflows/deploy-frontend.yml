@@ -1,0 +1,616 @@
+# ============================================================
+# Frontend を Build / Test し、S3 + CloudFront へ Deploy する
+# Reusable Workflow
+#
+# deploy.yml（Orchestrator）から workflow_call で呼び出され、
+# deploy-backend.yml が返した CloudFormation Outputs を受け取る。
+#
+# 主な責務:
+# - target_environment / Deploy先 Inputs の妥当性確認
+# - GitHub Environment の適用
+# - ENV_FILE（静的設定）と ApiEndpoint（動的設定）から .env を生成
+# - npm ci / Unit Test / Build
+# - Build Artifact 保存
+# - AWS OIDC 認証
+# - frontend/dist -> S3 ルート Deploy
+# - CloudFront Cache Invalidation
+#
+# この Workflow 自身には以下を持たせない:
+# - push
+# - workflow_dispatch
+# - concurrency
+# - branch から dev / prd を判定するロジック
+# - S3_BUCKET_NAME GitHub Variable
+# - BUILD_MODE GitHub Variable
+# - API Gateway URL の GitHub Secret / Variable
+#
+# ============================================================
+# ENV_FILE の重要な運用ルール
+#
+# API Gateway の実URLを ENV_FILE に保存しない。
+#
+# 現在使っている「API URL の環境変数名」はそのまま残し、
+# 値だけ以下の Placeholder に変更する。
+#
+#   __API_ENDPOINT__
+#
+# 例:
+#
+#   変更前:
+#     VITE_API_BASE_URL=https://xxxxx.execute-api.../api
+#
+#   変更後:
+#     VITE_API_BASE_URL=__API_ENDPOINT__
+#
+# Workflow 実行時に __API_ENDPOINT__ を
+# CloudFormation Output の ApiEndpoint へ置換して .env を生成する。
+#
+# この方式なら、Frontend 側の実際の環境変数名を Workflow が
+# 知る必要がなく、既存コードの環境変数名も変更不要。
+# ============================================================
+
+name: Deploy Frontend
+
+# ============================================================
+# 1. Reusable Workflow Interface
+# ============================================================
+
+on:
+  workflow_call:
+    inputs:
+      target_environment:
+        description: 'Deploy target environment: dev or prd'
+        required: true
+        type: string
+
+      api_endpoint:
+        description: 'API Gateway endpoint URL from CloudFormation Outputs'
+        required: true
+        type: string
+
+      frontend_bucket_name:
+        description: 'Frontend hosting S3 bucket name from CloudFormation Outputs'
+        required: true
+        type: string
+
+      cloudfront_distribution_id:
+        description: 'CloudFront Distribution ID from CloudFormation Outputs'
+        required: true
+        type: string
+
+      skip_test:
+        description: 'Skip frontend unit tests'
+        required: false
+        default: false
+        type: boolean
+
+# ============================================================
+# 2. Permissions
+# ============================================================
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # ==========================================================
+  # 3. Input Validation
+  # ==========================================================
+
+  validate-inputs:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate deployment inputs
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          API_ENDPOINT: ${{ inputs.api_endpoint }}
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront_distribution_id }}
+        run: |
+          set -Eeuo pipefail
+
+          case "$TARGET_ENVIRONMENT" in
+            dev|prd)
+              ;;
+            *)
+              echo "::error::Invalid target_environment: ${TARGET_ENVIRONMENT}"
+              echo "::error::Allowed values are: dev, prd"
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "${API_ENDPOINT:-}" || "$API_ENDPOINT" == "None" || "$API_ENDPOINT" == "null" ]]; then
+            echo "::error::api_endpoint is empty."
+            exit 1
+          fi
+
+          if [[ "$API_ENDPOINT" != https://* ]]; then
+            echo "::error::api_endpoint is not an HTTPS URL."
+            exit 1
+          fi
+
+          if [[ -z "${FRONTEND_BUCKET_NAME:-}" ]]; then
+            echo "::error::frontend_bucket_name is empty."
+            exit 1
+          fi
+
+          if [[ -z "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]]; then
+            echo "::error::cloudfront_distribution_id is empty."
+            exit 1
+          fi
+
+          echo "Target environment: ${TARGET_ENVIRONMENT}"
+          echo "Frontend deployment inputs validated."
+
+  # ==========================================================
+  # 4. Frontend Build / Deploy
+  #
+  # Environment Secrets:
+  # - AWS_ROLE_ARN
+  # - ENV_FILE
+  #
+  # Environment Variables:
+  # - AWS_REGION
+  # - AWS_ACCOUNT_ID
+  #
+  # ENV_FILE に API Gateway の実URLは保存しない。
+  # __API_ENDPOINT__ Placeholder のみを保持する。
+  # ==========================================================
+
+  build-and-deploy:
+    name: Build & Deploy Frontend
+    needs:
+      - validate-inputs
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    environment:
+      name: ${{ inputs.target_environment }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # ======================================================
+      # 5. Checkout
+      # ======================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # ======================================================
+      # 6. Deploy Information
+      # ======================================================
+
+      - name: Log deployment information
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          API_ENDPOINT: ${{ inputs.api_endpoint }}
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront_distribution_id }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || 'N/A' }}
+        run: |
+          set -Eeuo pipefail
+
+          printf '%s\n' '=== Frontend Deploy Start ==='
+          printf 'Environment : %s\n' "$TARGET_ENVIRONMENT"
+          printf 'Branch      : %s\n' "$GITHUB_REF_NAME"
+          printf 'Commit      : %s\n' "$GITHUB_SHA"
+          printf 'Actor       : %s\n' "$GITHUB_ACTOR"
+          printf 'Event       : %s\n' "$GITHUB_EVENT_NAME"
+          printf 'API         : %s\n' "$API_ENDPOINT"
+          printf 'Bucket      : %s\n' "$FRONTEND_BUCKET_NAME"
+          printf 'CloudFront  : %s\n' "$CLOUDFRONT_DISTRIBUTION_ID"
+          printf 'Message     : %s\n' "$COMMIT_MESSAGE"
+          printf '%s\n' '============================='
+
+      # ======================================================
+      # 7. GitHub Environment Configuration Validation
+      #
+      # ENV_FILE の内容自体はログへ出さない。
+      # ======================================================
+
+      - name: Validate environment configuration
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "${AWS_ROLE_ARN:-}" ]]; then
+            echo "::error::AWS_ROLE_ARN is not configured."
+            exit 1
+          fi
+
+          if [[ -z "${ENV_FILE:-}" ]]; then
+            echo "::error::ENV_FILE is not configured."
+            exit 1
+          fi
+
+          if [[ "$ENV_FILE" != *"__API_ENDPOINT__"* ]]; then
+            echo "::error::ENV_FILE does not contain the __API_ENDPOINT__ placeholder."
+            echo "::error::Replace the existing API Gateway URL value with __API_ENDPOINT__."
+            exit 1
+          fi
+
+          if [[ -z "${AWS_REGION:-}" ]]; then
+            echo "::error::AWS_REGION is not configured."
+            exit 1
+          fi
+
+          if [[ -z "${AWS_ACCOUNT_ID:-}" ]]; then
+            echo "::error::AWS_ACCOUNT_ID is not configured."
+            exit 1
+          fi
+
+          echo "Environment configuration validated."
+
+      # ======================================================
+      # 8. Node.js Setup
+      # ======================================================
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # ======================================================
+      # 9. Install Dependencies
+      # ======================================================
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # ======================================================
+      # 10. Check Test Script
+      # ======================================================
+
+      - name: Check test script
+        id: check-test
+        working-directory: frontend
+        run: |
+          set -Eeuo pipefail
+
+          if node -e '
+            const p = require("./package.json");
+            process.exit(p.scripts && p.scripts.test ? 0 : 1);
+          '; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ======================================================
+      # 11. Unit Test
+      #
+      # Test failure は一旦保持し、Artifact 保存後に failure を返す。
+      # ======================================================
+
+      - name: Run unit tests
+        id: unit-test
+        if: >-
+          ${{
+            steps.check-test.outputs.exists == 'true' &&
+            inputs.skip_test != true
+          }}
+        working-directory: frontend
+        env:
+          CI: 'true'
+        run: npm test
+        continue-on-error: true
+
+      # ======================================================
+      # 12. Test Result Artifact
+      # ======================================================
+
+      - name: Upload test results
+        if: >-
+          ${{
+            always() &&
+            steps.check-test.outputs.exists == 'true' &&
+            inputs.skip_test != true
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-results-${{ github.sha }}
+          path: frontend/test-results.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ======================================================
+      # 13. Propagate Test Failure
+      # ======================================================
+
+      - name: Fail when unit tests failed
+        if: ${{ steps.unit-test.outcome == 'failure' }}
+        run: |
+          echo "::error::Unit tests failed."
+          exit 1
+
+      # ======================================================
+      # 14. Generate .env
+      #
+      # ENV_FILE:
+      #   GitHub Environment Secret に保持する静的設定。
+      #
+      # API_ENDPOINT:
+      #   SAM Deploy 後の CloudFormation Output。
+      #
+      # ENV_FILE 内の __API_ENDPOINT__ を API_ENDPOINT に置換し、
+      # Build に使用する最終的な frontend/.env を生成する。
+      #
+      # 既存の環境変数名は変更不要。
+      # 例:
+      #
+      #   VITE_API_BASE_URL=__API_ENDPOINT__
+      #
+      #      ↓
+      #
+      #   VITE_API_BASE_URL=https://xxxxx.execute-api.../api
+      #
+      # Secret の内容や完成した .env はログへ表示しない。
+      # ======================================================
+
+      - name: Create .env file
+        working-directory: frontend
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          API_ENDPOINT: ${{ inputs.api_endpoint }}
+        run: |
+          set -Eeuo pipefail
+
+          PLACEHOLDER="__API_ENDPOINT__"
+
+          if [[ "$ENV_FILE" != *"$PLACEHOLDER"* ]]; then
+            echo "::error::ENV_FILE does not contain ${PLACEHOLDER}."
+            exit 1
+          fi
+
+          RENDERED_ENV="${ENV_FILE//$PLACEHOLDER/$API_ENDPOINT}"
+
+          if [[ "$RENDERED_ENV" == *"$PLACEHOLDER"* ]]; then
+            echo "::error::Failed to replace API endpoint placeholder."
+            exit 1
+          fi
+
+          umask 077
+          printf '%s\n' "$RENDERED_ENV" > .env
+
+          echo "frontend/.env generated successfully."
+
+      # ======================================================
+      # 15. Frontend Build
+      #
+      # BUILD_MODE GitHub Variable は廃止。
+      #
+      # dev -> npm run build-only:dev
+      # prd -> npm run build-only:prd
+      # ======================================================
+
+      - name: Build application
+        working-directory: frontend
+        env:
+          BUILD_MODE: ${{ inputs.target_environment }}
+        run: |
+          set -Eeuo pipefail
+          npm run "build-only:${BUILD_MODE}"
+
+      # ======================================================
+      # 16. Remove .env
+      #
+      # Build failure 時も always() で削除する。
+      # ======================================================
+
+      - name: Remove .env file
+        if: ${{ always() }}
+        working-directory: frontend
+        run: rm -f .env
+
+      # ======================================================
+      # 17. Verify Build Output
+      #
+      # --delete 付き S3 sync の前に空成果物を防ぐ。
+      # ======================================================
+
+      - name: Verify build output
+        working-directory: frontend
+        run: |
+          set -Eeuo pipefail
+
+          if [[ ! -d dist ]]; then
+            echo "::error::frontend/dist directory does not exist."
+            exit 1
+          fi
+
+          FILE_COUNT="$(
+            find dist -type f -print | wc -l
+          )"
+
+          if (( FILE_COUNT == 0 )); then
+            echo "::error::frontend/dist is empty."
+            exit 1
+          fi
+
+          echo "Build output files: ${FILE_COUNT}"
+
+      # ======================================================
+      # 18. Build Artifact
+      # ======================================================
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist-${{ github.sha }}
+          path: frontend/dist/
+          retention-days: 3
+          if-no-files-found: error
+          include-hidden-files: true
+
+      # ======================================================
+      # 19. AWS OIDC Authentication
+      #
+      # Backend Workflow とは別 Runner なので、
+      # Frontend 側でも Credential を取得する。
+      # ======================================================
+
+      - name: Configure AWS credentials from OIDC
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: frontend-${{ inputs.target_environment }}-${{ github.run_id }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+
+      # ======================================================
+      # 20. Verify Frontend Bucket
+      #
+      # S3 Bucket 名は Backend / CloudFormation Output 由来。
+      # ======================================================
+
+      - name: Verify frontend bucket
+        env:
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+        run: |
+          set -Eeuo pipefail
+
+          aws s3api head-bucket \
+            --bucket "$FRONTEND_BUCKET_NAME"
+
+          echo "Frontend bucket is accessible."
+
+      # ======================================================
+      # 21. Deploy Frontend to S3
+      # ======================================================
+
+      - name: Deploy frontend to S3
+        env:
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+        run: |
+          set -Eeuo pipefail
+
+          BUCKET="s3://${FRONTEND_BUCKET_NAME}"
+
+          if [[ ! -d frontend/dist ]]; then
+            echo "::error::frontend/dist does not exist."
+            exit 1
+          fi
+
+          LOCAL_FILE_COUNT="$(
+            find frontend/dist -type f -print | wc -l
+          )"
+
+          if (( LOCAL_FILE_COUNT == 0 )); then
+            echo "::error::frontend/dist is empty."
+            exit 1
+          fi
+
+          echo "Local build files: ${LOCAL_FILE_COUNT}"
+
+          aws s3 sync \
+            frontend/dist/ \
+            "${BUCKET}/" \
+            --delete \
+            --only-show-errors
+
+          echo "S3 sync completed."
+
+      # ======================================================
+      # 23. Verify S3 Deployment
+      # ======================================================
+
+      - name: Verify S3 deployment
+        env:
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+        run: |
+          set -Eeuo pipefail
+
+          DEPLOYED_OBJECT_COUNT="$(
+            aws s3api list-objects-v2 \
+              --bucket "$FRONTEND_BUCKET_NAME" \
+              --max-keys 1 \
+              --query 'KeyCount' \
+              --output text
+          )"
+
+          if (( DEPLOYED_OBJECT_COUNT == 0 )); then
+            echo "::error::No objects found after frontend deployment."
+            exit 1
+          fi
+
+          echo "Frontend deployment verified."
+
+      # ======================================================
+      # 24. CloudFront Cache Invalidation
+      #
+      # IAM Role には cloudfront:CreateInvalidation が必要。
+      # ======================================================
+
+      - name: Invalidate CloudFront cache
+        id: cloudfront-invalidation
+        env:
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront_distribution_id }}
+        run: |
+          set -Eeuo pipefail
+
+          INVALIDATION_ID="$(
+            aws cloudfront create-invalidation \
+              --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+              --paths "/*" \
+              --query 'Invalidation.Id' \
+              --output text
+          )"
+
+          if [[
+            -z "${INVALIDATION_ID:-}" ||
+            "$INVALIDATION_ID" == "None" ||
+            "$INVALIDATION_ID" == "null"
+          ]]; then
+            echo "::error::Failed to create CloudFront invalidation."
+            exit 1
+          fi
+
+          echo "CloudFront invalidation created: ${INVALIDATION_ID}"
+          echo "invalidation_id=${INVALIDATION_ID}" >> "$GITHUB_OUTPUT"
+
+      # ======================================================
+      # 25. Deployment Summary
+      # ======================================================
+
+      - name: Write deployment summary
+        if: ${{ success() }}
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          API_ENDPOINT: ${{ inputs.api_endpoint }}
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront_distribution_id }}
+          INVALIDATION_ID: ${{ steps.cloudfront-invalidation.outputs.invalidation_id }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -Eeuo pipefail
+
+          {
+            echo "## Frontend Deployment"
+            echo
+            echo "- Environment: \`${TARGET_ENVIRONMENT}\`"
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- AWS Region: \`${AWS_REGION}\`"
+            echo "- API Endpoint: \`${API_ENDPOINT}\`"
+            echo "- S3 Bucket: \`${FRONTEND_BUCKET_NAME}\`"
+            echo "- CloudFront Distribution: \`${CLOUDFRONT_DISTRIBUTION_ID}\`"
+            echo "- CloudFront Invalidation: \`${INVALIDATION_ID}\`"
+            echo "- Result: ✅ Success"
+          } >> "$GITHUB_STEP_SUMMARY"

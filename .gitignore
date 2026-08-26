@@ -1,0 +1,50 @@
+# ---- Node / フロントエンド ----
+node_modules/
+dist/
+dist-ssr/
+*.local
+.eslintcache
+coverage/
+
+# ---- Playwright ----
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
+
+# ---- Python / バックエンド ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- AWS SAM ----
+.aws-sam/
+
+# ---- 環境変数 (実ファイルは絶対にコミットしない) ----
+.env
+.env.*
+!.env.example
+
+# ---- テスト / ビルド生成物 ----
+test-results.xml
+vite.config.js
+vite.config.d.ts
+
+# ---- エディタ / OS ----
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# ---- Claude Code 個人設定 ----
+.claude/settings.local.json
+
+# ---- 作業用アーカイブ ----
+*.zip

@@ -1,0 +1,23 @@
+version = 0.1
+
+[dev.deploy.parameters]
+disable_rollback = false
+stack_name = "hongo-dev-nba-dashboard"
+resolve_s3 = true
+s3_prefix = "hongo-dev-nba-dashboard"
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_NAMED_IAM"
+fail_on_empty_changeset = false
+confirm_changeset = false
+parameter_overrides = "ParameterKey=ResourcePrefix,ParameterValue=hongo ParameterKey=Environment,ParameterValue=dev ParameterKey=ProjectName,ParameterValue=nba-dashboard ParameterKey=NbaCurrentSeason,ParameterValue=2025-26"
+
+[prd.deploy.parameters]
+disable_rollback = false
+stack_name = "hongo-prd-nba-dashboard"
+resolve_s3 = true
+s3_prefix = "hongo-prd-nba-dashboard"
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_NAMED_IAM"
+fail_on_empty_changeset = false
+confirm_changeset = false
+parameter_overrides = "ParameterKey=ResourcePrefix,ParameterValue=hongo ParameterKey=Environment,ParameterValue=prd ParameterKey=ProjectName,ParameterValue=nba-dashboard ParameterKey=NbaCurrentSeason,ParameterValue=2025-26"

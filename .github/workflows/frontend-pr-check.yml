@@ -1,0 +1,231 @@
+# ============================================================
+# Pull Request 作成・更新時に、フロントエンドを自動検証するための
+# ワークフロー
+#
+# このファイルでは、PR を merge する前に
+# 「Unit Test」「Type Check」「Build」を確認する。
+# ============================================================
+name: Frontend PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: frontend-pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+
+  #
+  # frontend/ 配下について以下を確認する。
+  #
+  # - npm 依存関係の再現可能なインストール
+  # - Unit Test
+  # - Type Check
+  # - Vite Build
+  #
+  # Test と Build の両方を最後まで実行し、
+  # 1回の CI で可能な限り多くの問題を確認する。
+  # ==========================================================
+  check-frontend:
+    name: Frontend Check
+
+    # GitHub が用意する Linux Runner 上で実行する。
+    runs-on: ubuntu-latest
+
+    # 異常終了せず処理が止まった場合でも、
+    # 15分でジョブを終了させる。
+    timeout-minutes: 15
+
+    # ========================================================
+    # 13. Frontend Job の GitHub Token 権限
+    #
+    # PR Check ではソースコードの読み取りだけを行う。
+    #
+    # Artifact の Upload は actions/upload-artifact が処理するため、
+    # checks: write のような追加権限は不要。
+    # ========================================================
+    permissions:
+      contents: read
+
+    steps:
+      # ======================================================
+      # 14. リポジトリを Runner に取得
+      #
+      # PR のソースコードを Runner 上へ checkout する。
+      #
+      # persist-credentials: false:
+      #   git push などを行わないため、
+      #   GITHUB_TOKEN を git config に残さない。
+      # ======================================================
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # ======================================================
+      # 15. Pull Request 情報をログへ出力
+      #
+      # PR 番号・タイトル・変更元/変更先ブランチ・実行者を
+      # Actions のログから確認できるようにする。
+      #
+      # PR Title などは外部入力になり得るため、
+      # GitHub Expression を run: に直接埋め込まず env 経由で渡す。
+      # ======================================================
+      - name: Log PR info
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          printf '%s\n' '=== PR Check Start (Frontend) ==='
+          printf 'PR Number: %s\n' "$PR_NUMBER"
+          printf 'PR Title : %s\n' "$PR_TITLE"
+          printf 'Branch   : %s -> %s\n' "$HEAD_REF" "$BASE_REF"
+          printf 'Actor    : %s\n' "$ACTOR"
+          printf '%s\n' '================================='
+
+      # ======================================================
+      # 16. Node.js をセットアップ
+      #
+      # PR のテスト・型チェック・Build に使用する Node.js を
+      # GitHub Actions Runner 上へ用意する。
+      #
+      # cache: npm:
+      #   npm のキャッシュを利用し、
+      #   2回目以降の依存パッケージ取得を高速化する。
+      #
+      # cache-dependency-path:
+      #   frontend/package-lock.json をキャッシュ更新判定に利用する。
+      # ======================================================
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # ======================================================
+      # 17. 依存パッケージをインストール
+      #
+      # CI では npm install ではなく npm ci を使用する。
+      #
+      # package-lock.json に固定された依存関係を使って
+      # クリーンインストールするため、
+      # 開発PCとCIで依存バージョンがずれるリスクを減らせる。
+      # ======================================================
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # ======================================================
+      # 18. Unit Test
+      #
+      # Vitest など package.json の test script を実行する。
+      #
+      # CI=true:
+      #   テストツール側に CI 環境であることを明示する。
+      #
+      # continue-on-error: true:
+      #   Unit Test が失敗しても、この時点では Job 全体を止めない。
+      #
+      # 先に Artifact 保存と Type Check / Build まで実行し、
+      # 最後に Test / Build の結果をまとめて判定する。
+      #
+      # これにより、1回の PR Check で複数の問題を発見しやすくなる。
+      # ======================================================
+      - name: Run unit tests
+        id: vitest
+        working-directory: frontend
+        env:
+          CI: 'true'
+        run: npm run test
+        continue-on-error: true
+
+      # ======================================================
+      # 19. Unit Test の結果を Artifact として保存
+      #
+      # テスト失敗時でも always() により実行する。
+      #
+      # test-results.xml を残すことで、
+      # Job が failure になったあとでも詳細なテスト結果を確認できる。
+      #
+      # if-no-files-found: ignore:
+      #   Test Runner 側で XML が生成されなかった場合でも、
+      #   Artifact Upload 自体では Workflow を失敗させない。
+      # ======================================================
+      - name: Upload test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-results-${{ github.event.pull_request.number }}
+          path: frontend/test-results.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ======================================================
+      # 20. Type Check & Build
+      #
+      # package.json の build script を実行し、
+      # TypeScript の型チェックと Vite Build を確認する。
+      #
+      # Unit Test が失敗していてもこの Step は実行される。
+      #
+      # continue-on-error: true:
+      #   Build が失敗しても、ここでは Job を止めず、
+      #   最後の Check frontend result でまとめて成否を判定する。
+      #
+      # これにより、
+      #
+      #   Unit Test NG
+      #   Type Check NG
+      #
+      # のような複数の問題を1回のCIで確認できる。
+      # ======================================================
+      - name: Type check & Build
+        id: frontend-build
+        working-directory: frontend
+        run: npm run build
+        continue-on-error: true
+
+      # ======================================================
+      # 21. Frontend Check の最終判定
+      #
+      # Unit Test または Build のどちらか一方でも失敗していれば、
+      # Job 全体を failure にする。
+      #
+      # always():
+      #   前の Step の結果に関係なく、この判定処理を実行する。
+      #
+      # steps.<id>.outcome:
+      #   continue-on-error 適用前の実際の Step 結果を確認できる。
+      #
+      # Test / Build の結果をログにも出してから exit 1 するため、
+      # PR 画面から原因を追いやすい。
+      # ======================================================
+      - name: Check frontend result
+        if: >-
+          ${{
+            always() &&
+            (
+              steps.vitest.outcome == 'failure' ||
+              steps.frontend-build.outcome == 'failure'
+            )
+          }}
+        env:
+          TEST_OUTCOME: ${{ steps.vitest.outcome }}
+          BUILD_OUTCOME: ${{ steps.frontend-build.outcome }}
+        run: |
+          printf 'Unit test outcome : %s\n' "$TEST_OUTCOME"
+          printf 'Build outcome     : %s\n' "$BUILD_OUTCOME"
+          exit 1

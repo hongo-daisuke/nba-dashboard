@@ -1,0 +1,621 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  NBA Dashboard personal learning project
+
+Parameters:
+  ResourcePrefix:
+    Type: String
+    Default: hongo
+    AllowedPattern: '^[a-z0-9-]+$'
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prd
+
+  ProjectName:
+    Type: String
+    Default: nba-dashboard
+    AllowedPattern: '^[a-z0-9-]+$'
+
+  NbaCurrentSeason:
+    Type: String
+    Default: '2024-25'
+    Description: 'NBA シーズン識別子 (例: 2024-25)'
+
+
+Resources:
+  # ============================================================
+  # DynamoDB テーブル
+  # ============================================================
+
+  # チームテーブル
+  TeamsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-teams-table'
+      BillingMode: PAY_PER_REQUEST
+      TableClass: STANDARD
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: team_id
+          AttributeType: S
+        - AttributeName: conference
+          AttributeType: S
+      KeySchema:
+        - AttributeName: team_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: conference-index
+          KeySchema:
+            - AttributeName: conference
+              KeyType: HASH
+            - AttributeName: team_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # 選手テーブル
+  PlayersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-players-table'
+      BillingMode: PAY_PER_REQUEST
+      TableClass: STANDARD
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: player_id
+          AttributeType: S
+        - AttributeName: team_id
+          AttributeType: S
+        - AttributeName: position
+          AttributeType: S
+      KeySchema:
+        - AttributeName: player_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: team-index
+          KeySchema:
+            - AttributeName: team_id
+              KeyType: HASH
+            - AttributeName: player_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: position-index
+          KeySchema:
+            - AttributeName: position
+              KeyType: HASH
+            - AttributeName: player_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # 選手シーズンスタッツテーブル (PK: player_id, SK: season)
+  PlayerStatsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-player-stats-table'
+      BillingMode: PAY_PER_REQUEST
+      TableClass: STANDARD
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: player_id
+          AttributeType: S
+        - AttributeName: season
+          AttributeType: S
+      KeySchema:
+        - AttributeName: player_id
+          KeyType: HASH
+        - AttributeName: season
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # 試合テーブル (PK: game_date, SK: game_id)
+  GamesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-games-table'
+      BillingMode: PAY_PER_REQUEST
+      TableClass: STANDARD
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: game_date
+          AttributeType: S
+        - AttributeName: game_id
+          AttributeType: S
+        - AttributeName: home_team_id
+          AttributeType: S
+        - AttributeName: away_team_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: game_date
+          KeyType: HASH
+        - AttributeName: game_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: home-team-index
+          KeySchema:
+            - AttributeName: home_team_id
+              KeyType: HASH
+            - AttributeName: game_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: away-team-index
+          KeySchema:
+            - AttributeName: away_team_id
+              KeyType: HASH
+            - AttributeName: game_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: game-id-index
+          KeySchema:
+            - AttributeName: game_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # 試合ごとの選手スタッツテーブル (PK: game_id, SK: player_id)
+  GameStatsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-game-stats-table'
+      BillingMode: PAY_PER_REQUEST
+      TableClass: STANDARD
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: game_id
+          AttributeType: S
+        - AttributeName: player_id
+          AttributeType: S
+        - AttributeName: game_date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: game_id
+          KeyType: HASH
+        - AttributeName: player_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: player-index
+          KeySchema:
+            - AttributeName: player_id
+              KeyType: HASH
+            - AttributeName: game_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # 順位表テーブル (PK: season, SK: conference#seed)
+  StandingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-standings-table'
+      BillingMode: PAY_PER_REQUEST
+      TableClass: STANDARD
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: season
+          AttributeType: S
+        - AttributeName: conference#seed
+          AttributeType: S
+      KeySchema:
+        - AttributeName: season
+          KeyType: HASH
+        - AttributeName: conference#seed
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ============================================================
+  # DynamoDB アクセスポリシー (API / Batch 共通)
+  # ============================================================
+
+  DynamoDbPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-dynamodb-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+              - dynamodb:BatchWriteItem
+              - dynamodb:BatchGetItem
+              - dynamodb:Query
+              - dynamodb:Scan
+            Resource:
+              - !GetAtt TeamsTable.Arn
+              - !Sub '${TeamsTable.Arn}/index/*'
+              - !GetAtt PlayersTable.Arn
+              - !Sub '${PlayersTable.Arn}/index/*'
+              - !GetAtt PlayerStatsTable.Arn
+              - !Sub '${PlayerStatsTable.Arn}/index/*'
+              - !GetAtt GamesTable.Arn
+              - !Sub '${GamesTable.Arn}/index/*'
+              - !GetAtt GameStatsTable.Arn
+              - !Sub '${GameStatsTable.Arn}/index/*'
+              - !GetAtt StandingsTable.Arn
+              - !Sub '${StandingsTable.Arn}/index/*'
+
+  # ============================================================
+  # バックエンド用 API Gateway
+  # ============================================================
+
+  FrontendApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-api'
+      StageName: !Ref Environment
+      EndpointConfiguration:
+        Type: REGIONAL
+      Description: nba-dashboard サンプル REST API
+      Cors:
+        AllowMethods: "'POST,OPTIONS,GET,DELETE,PUT,PATCH'"
+        AllowHeaders: "'Authorization,Content-Type,X-Amz-Date,X-Amz-Security-Token,X-Api-Key'"
+        AllowOrigin: "'*'"
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+
+  # ============================================================
+  # Lambda Layer
+  # ============================================================
+
+  # API Lambda 用 Layer (aws-lambda-powertools)
+  FrontendApiLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      Description: aws_lambda_powertools==3.34.0
+      LayerName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-api-layer'
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.13
+    Metadata:
+      BuildMethod: python3.13
+
+  # バッチ Lambda 用 Layer (aws-lambda-powertools + requests)
+  NbaBatchLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      Description: aws_lambda_powertools + requests
+      LayerName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-batch-layer'
+      ContentUri: layer/batch/
+      CompatibleRuntimes:
+        - python3.12
+    Metadata:
+      BuildMethod: python3.12
+
+  # ============================================================
+  # Lambda 実行ロール
+  # ============================================================
+
+  # API Lambda ロール (DynamoDB アクセス)
+  FrontendApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-api-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref DynamoDbPolicy
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # バッチ Lambda ロール (DynamoDB アクセス)
+  NbaBatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-batch-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref DynamoDbPolicy
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ============================================================
+  # Lambda 関数
+  # ============================================================
+
+  # API Lambda
+  FrontendApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.13
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt FrontendApiRole.Arn
+      CodeUri: lambda_functions/frontend_api/
+      Description: フロントエンド API
+      FunctionName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-api-function'
+      Timeout: 30
+      MemorySize: 256
+      ReservedConcurrentExecutions: 10
+      Architectures:
+        - x86_64
+      AutoPublishAlias: live
+      Layers:
+        - !Ref FrontendApiLayer
+      Events:
+        # NBAチーム一覧
+        GetTeams:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontendApi
+            Path: /teams
+            Method: GET
+        # NBAチーム詳細
+        GetTeam:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontendApi
+            Path: /teams/{team_id}
+            Method: GET
+        # NBA選手一覧
+        GetPlayers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontendApi
+            Path: /players
+            Method: GET
+        # NBA選手詳細 (スタッツ付き)
+        GetPlayer:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontendApi
+            Path: /players/{player_id}
+            Method: GET
+        # 試合結果一覧
+        GetGames:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontendApi
+            Path: /games
+            Method: GET
+        # 試合詳細 + ボックススコア
+        GetGame:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontendApi
+            Path: /games/{game_id}
+            Method: GET
+        # 選手ゲームログ
+        GetPlayerGameLog:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontendApi
+            Path: /players/{player_id}/game-log
+            Method: GET
+        # 順位表
+        GetStandings:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontendApi
+            Path: /standings
+            Method: GET
+        # スタッツリーダーボード
+        GetLeaders:
+          Type: Api
+          Properties:
+            RestApiId: !Ref FrontendApi
+            Path: /leaders
+            Method: GET
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: !Ref ProjectName
+          LOG_LEVEL: INFO
+          TEAMS_TABLE: !Ref TeamsTable
+          PLAYERS_TABLE: !Ref PlayersTable
+          PLAYER_STATS_TABLE: !Ref PlayerStatsTable
+          GAMES_TABLE: !Ref GamesTable
+          GAME_STATS_TABLE: !Ref GameStatsTable
+          STANDINGS_TABLE: !Ref StandingsTable
+          NBA_CURRENT_SEASON: !Ref NbaCurrentSeason
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+
+  # バッチ Lambda (EventBridge から毎日実行)
+  NbaBatchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt NbaBatchRole.Arn
+      CodeUri: lambda_functions/nba_batch/
+      Description: NBA データ取得バッチ (ESPN → DynamoDB)
+      FunctionName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-batch-function'
+      Timeout: 900
+      MemorySize: 1024
+      ReservedConcurrentExecutions: 1
+      Architectures:
+        - x86_64
+      Layers:
+        - !Ref NbaBatchLayer
+      Events:
+        # 毎日 JST 06:00 (UTC 21:00) に実行
+        DailySchedule:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-batch-schedule'
+            ScheduleExpression: 'cron(0 21 * * ? *)'
+            ScheduleExpressionTimezone: UTC
+            State: ENABLED
+            RetryPolicy:
+              MaximumRetryAttempts: 2
+              MaximumEventAgeInSeconds: 3600
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: !Sub '${ProjectName}-batch'
+          LOG_LEVEL: INFO
+          TEAMS_TABLE: !Ref TeamsTable
+          PLAYERS_TABLE: !Ref PlayersTable
+          PLAYER_STATS_TABLE: !Ref PlayerStatsTable
+          GAMES_TABLE: !Ref GamesTable
+          GAME_STATS_TABLE: !Ref GameStatsTable
+          STANDINGS_TABLE: !Ref StandingsTable
+          NBA_CURRENT_SEASON: !Ref NbaCurrentSeason
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+
+  # ============================================================
+  # フロントエンドホスティング
+  # ============================================================
+
+  # S3 バケット
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-frontend-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # CloudFront OAC のみに GetObject を許可
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
+
+  # S3 への署名付きアクセス制御 (OAC)
+  FrontendOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ResourcePrefix}-${Environment}-${ProjectName}-frontend-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # CloudFront ディストリビューション
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt FrontendOAC.Id
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          Compress: true
+        CustomErrorResponses:
+          # SPA のルーティング用: 403/404 を index.html にフォールバック
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        PriceClass: PriceClass_200
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway エンドポイント URL
+    Value: !Sub 'https://${FrontendApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+
+  FrontendBucketName:
+    Description: フロントエンド S3 バケット名 (CI/CD の aws s3 sync で使用)
+    Value: !Ref FrontendBucket
+
+  CloudFrontDomain:
+    Description: CloudFront ディストリビューションドメイン (フロントエンド URL)
+    Value: !GetAtt FrontendDistribution.DomainName
+
+  CloudFrontDistributionId:
+    Description: CloudFront Distribution ID (CI/CD の Invalidation で使用)
+    Value: !Ref FrontendDistribution
