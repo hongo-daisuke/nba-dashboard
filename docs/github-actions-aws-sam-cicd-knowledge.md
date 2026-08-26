@@ -868,16 +868,9 @@ Secret 値そのものを出さずに確認します。
 
 **Secret の値そのものを `echo` しない**ことが重要です。
 
-### 現在の Repository に残る後片付け
+### Secret の存在確認パターン
 
-現在の `deploy.yml` には、トラブルシュート用の `debug-environment` Job がまだ残っています。
-
-```text
-# ログ (削除します)
-debug-environment:
-```
-
-また、同じファイルに「Environment Secrets / Variables は caller から横流ししない」という古いコメントが残っていますが、現在は `secrets: inherit` も使用しています。**実装とコメントを一致させるため、これも更新対象**です。
+Secret 値そのものを出力せずに確認するには、上記の shell 空判定パターンを使います。
 
 ## 9.4 Reusable Workflow の `permissions` は caller が上限になる
 
@@ -1910,12 +1903,6 @@ Repository構成
 現在の構成は実際に Deploy まで成功しています。ただし、**動くこと**と**本番運用へそのまま持ち込めること**は分けて考えます。
 
 ## 24.1 本番適用前に解消する TODO
-
-### Debug Job を削除する
-
-トラブルシュート用に追加した `debug-environment` Job が `deploy.yml` に残っているため、本番適用前に削除します。
-
-あわせて、同じ箇所に残る古い Secret 継承コメントも現在の実装に合わせて更新します。
 
 ### IAM Permission を最小権限化する
 
