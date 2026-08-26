@@ -482,7 +482,7 @@ Resources:
   NbaBatchFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Runtime: python3.12
+      Runtime: python3.13
       Handler: lambda_function.lambda_handler
       Role: !GetAtt NbaBatchRole.Arn
       CodeUri: lambda_functions/nba_batch/
