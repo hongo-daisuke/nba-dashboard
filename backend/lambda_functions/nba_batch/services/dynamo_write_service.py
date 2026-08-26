@@ -106,17 +106,42 @@ def recompute_player_stats(season: str) -> None:
 
     GameStats には season フィールドがないため game_date の範囲で対象シーズンを特定する。
     例: "2025-26" → 2025-10-01 〜 2026-07-01
+    レギュラーシーズンのみ集計する（プレーイン・プレーオフは除外）。
     """
     year_start = int(season.split("-")[0])
     date_from = f"{year_start}-10-01"
     date_to = f"{year_start + 1}-07-01"
 
+    from boto3.dynamodb.conditions import Attr  # ローカルインポートで循環回避
+
+    # Games テーブルから game_id → game_type マップを構築
+    games_table = _table(EnvironmentConfig.get_games_table())
+    game_type_map: dict[str, str] = {}
+    response = games_table.scan(
+        FilterExpression=Attr("game_date").gte(date_from) & Attr("game_date").lt(date_to),
+        ProjectionExpression="game_id, game_type",
+    )
+    for item in response.get("Items", []):
+        gid = str(item.get("game_id", ""))
+        if gid:
+            game_type_map[gid] = str(item.get("game_type", "regular"))
+    while "LastEvaluatedKey" in response:
+        response = games_table.scan(
+            FilterExpression=Attr("game_date").gte(date_from) & Attr("game_date").lt(date_to),
+            ProjectionExpression="game_id, game_type",
+            ExclusiveStartKey=response["LastEvaluatedKey"],
+        )
+        for item in response.get("Items", []):
+            gid = str(item.get("game_id", ""))
+            if gid:
+                game_type_map[gid] = str(item.get("game_type", "regular"))
+
+    logger.info("Games テーブル読み込み完了", extra={"season": season, "games": len(game_type_map)})
+
     game_stats_table = _table(EnvironmentConfig.get_game_stats_table())
     logger.info("PlayerStats 再計算開始", extra={"season": season, "date_from": date_from, "date_to": date_to})
 
     # GameStats を全件スキャン（game_date でフィルタ）
-    from boto3.dynamodb.conditions import Attr  # ローカルインポートで循環回避
-
     items: list[dict] = []
     response = game_stats_table.scan(
         FilterExpression=Attr("game_date").gte(date_from) & Attr("game_date").lt(date_to),
@@ -131,9 +156,13 @@ def recompute_player_stats(season: str) -> None:
 
     logger.info("GameStats スキャン完了", extra={"count": len(items)})
 
-    # 選手単位で集計
+    # 選手単位で集計（レギュラーシーズンのみ）
     aggregated: dict[str, dict] = {}
     for stat in items:
+        game_id = str(stat.get("game_id", ""))
+        # games テーブルに game_type がある場合のみ除外判定。ない場合は regular 扱い
+        if game_type_map.get(game_id, "regular") != "regular":
+            continue
         pid = str(stat.get("player_id", ""))
         if not pid:
             continue

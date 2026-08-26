@@ -126,10 +126,15 @@ def fetch_games(
             # "2026-01-18T17:00Z" → "2026-01-18"
             game_date = str(event.get("date", ""))[:10]
 
+            # season.type: 2 = レギュラーシーズン, それ以外 = プレーイン/プレーオフ
+            season_type = event.get("season", {}).get("type", 2)
+            game_type = "regular" if season_type == 2 else "postseason"
+
             result.append({
                 "game_date": game_date,
                 "game_id": str(event["id"]),
                 "season": season,
+                "game_type": game_type,
                 "status": "Final" if status == "Final" else status,
                 "home_team_id": str(home.get("team", {}).get("id", "")),
                 "home_team_abbreviation": str(home.get("team", {}).get("abbreviation", "")),

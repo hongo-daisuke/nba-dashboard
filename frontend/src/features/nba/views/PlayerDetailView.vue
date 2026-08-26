@@ -37,7 +37,7 @@
       <!-- シーズンスタッツ -->
       <el-card v-if="player.stats" style="margin-bottom: 24px;">
         <template #header>
-          シーズンスタッツ ({{ player.stats.season }}) — {{ player.stats.gamesPlayed }} 試合
+          平均スタッツ ({{ player.stats.season }}) — {{ player.stats.gamesPlayed }} 試合
         </template>
         <el-row :gutter="16" style="text-align: center;">
           <el-col v-for="stat in displayStats" :key="stat.label" :xs="8" :sm="4">
@@ -112,15 +112,16 @@ const gameLogLoading = ref(false)
 const displayStats = computed(() => {
   if (!player.value?.stats) return []
   const s = player.value.stats
+  const gp = s.gamesPlayed || 1
   return [
-    { label: 'PTS', value: s.points },
-    { label: 'REB', value: s.rebounds },
-    { label: 'AST', value: s.assists },
-    { label: 'STL', value: s.steals },
-    { label: 'BLK', value: s.blocks },
-    { label: 'FG%', value: `${(s.fgPct * 100).toFixed(1)}%` },
-    { label: '3P%', value: `${(s.fg3Pct * 100).toFixed(1)}%` },
-    { label: 'FT%', value: `${(s.ftPct * 100).toFixed(1)}%` },
+    { label: 'PTS', value: (s.points / gp).toFixed(1) },
+    { label: 'REB', value: (s.rebounds / gp).toFixed(1) },
+    { label: 'AST', value: (s.assists / gp).toFixed(1) },
+    { label: 'STL', value: (s.steals / gp).toFixed(1) },
+    { label: 'BLK', value: (s.blocks / gp).toFixed(1) },
+    { label: 'FG%', value: `${s.fgPct.toFixed(1)}%` },
+    { label: '3P%', value: `${s.fg3Pct.toFixed(1)}%` },
+    { label: 'FT%', value: `${s.ftPct.toFixed(1)}%` },
   ]
 })
 
