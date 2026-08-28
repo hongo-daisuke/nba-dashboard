@@ -1,8 +1,37 @@
 # GitHub Actions + AWS SAM CI/CD 設計・構築ナレッジ
 
 > 対象: Vue/Vite フロントエンド + AWS SAM バックエンドを 1 リポジトリで管理し、GitHub Actions から dev / prd へ安全にデプロイする構成  
-> 初版: 2026-08-20 / 更新: 2026-08-26  
+> 初版: 2026-08-20 / 更新: 2026-08-27  
 > ベース: 個人学習用 `nba-dashboard` の現在実装と、構築時のトラブルシュート記録
+
+---
+
+## 0.0 30秒で分かる完成形
+
+```text
+Pull Request (feature/*)
+├─ backend-pr-check.yml
+└─ frontend-pr-check.yml
+
+dev / main push
+       ↓
+   deploy.yml（Orchestrator）
+   ├─ deploy-backend.yml
+   │   ↓
+   │  SAM Deploy
+   │   ↓
+   │  CloudFormation Outputs取得
+   │   (ApiEndpoint / FrontendBucketName / CloudFrontDistributionId)
+   └─ deploy-frontend.yml
+       ↓
+      .env 生成 / Vite Build
+       ↓
+      S3 root deploy
+       ↓
+      CloudFront Invalidation
+```
+
+PR は `backend-pr-check.yml` / `frontend-pr-check.yml` で検証。`dev` / `main` へ Merge 後に `deploy.yml` が Backend → Frontend の順で AWS へデプロイします。`main` は `prd` 環境、`dev` は `dev` 環境が対象です。
 
 ---
 
@@ -35,7 +64,18 @@ CI/CD の基本構成を整えた後もアプリケーション開発は進み�
 > **表記ルール: 一般仕様**  
 > GitHub / AWS / Vite の公式仕様として確認した内容です。今回の実測結果と一般仕様が混ざらないように分けて記載します。
 
-### 0.1 5分で分かる全体像
+### 0.1 この文書の読み方
+
+| 目的 | 読む章 |
+|------|--------|
+| 初めて読む | 0.0 → 0.2 → 1 → 4 → 5 → 6 → 21 |
+| 完成形だけ確認したい | 0.0 → 21 → Appendix (27) |
+| Environment / Secret / OIDC を知りたい | 8 → 9 → 10 → 11 |
+| PR / Ruleset を設定したい | 14 → 16 → 17 |
+| 別プロジェクトへ横展開したい | 20 → 21 → Appendix (27) |
+| エラー対応をしたい | 22 → 該当する詳細章 |
+
+### 0.2 5分で分かる全体像
 
 #### Architecture
 
@@ -127,22 +167,22 @@ Temporary Credentials
 
 ここまでで全体像は十分です。以降は、**「なぜこの構成になったか」「設定方法」「実際にハマった問題」**を必要に応じて読んでください。
 
-### 0.2 読む順番
+### 0.3 構築の経緯を知る
+
+この構成に至った経緯・初期設計の問題・各問題の切り分け方を知りたい場合は次の章を参照してください。
 
 | 読みたい内容 | 推奨する章 |
 |---|---|
-| まず全体像だけ知りたい | 0.1 → 1 |
-| 初めて構成を理解する | 1 → 3 → 4 → 5 → 6 → 8 → 10 → 25 |
-| 実際に設定・横展開する | 20 → 21 → 25 |
-| Secret / OIDC 周りを理解する | 8 → 9 → 10 → 11 |
-| エラーを調べる | 22 → 該当する詳細章 |
-| この構成に至った経緯を知る | 3 → 23 |
+| 初期構成の問題点 | 3 |
+| モノレポ / ポリレポ比較 | 2 |
+| この構成に至った経緯（時系列） | 23 |
+| 設計原則のまとめ | 25 |
 
 ---
 
 # 1. 最終構成の要点
 
-5分版の全体像は「0.1 5分で分かる全体像」を参照してください。ここでは、以降の詳細章を読むために Branch と Deploy の対応だけを押さえます。
+5分版の全体像は「0.2 5分で分かる全体像」を参照してください。ここでは、以降の詳細章を読むために Branch と Deploy の対応だけを押さえます。
 
 ```text
 Pull Request Check -> merge -> Deploy -> Backend / SAM -> CloudFormation Outputs -> Frontend
@@ -1645,9 +1685,51 @@ Trust Policy では次を確認します。
 
 **Workflow をそのままコピーすることより、値の Source of Truth と権限境界を新しい案件に合わせることを優先します。**
 
+## 別プロジェクトで変更する値の一覧
+
+現在の `nba-dashboard` の値を基準に、別プロジェクトへ横展開するときに変更する箇所をまとめます。
+
+| 分類 | 現在値 | 別プロジェクトで変更するもの | 変更場所 |
+|------|--------|------------------------------|----------|
+| ResourcePrefix | `hongo` | 組織・チームの識別子 | `samconfig.toml` |
+| ProjectName | `nba-dashboard` | プロジェクト名 | `samconfig.toml` |
+| Environment 名 | `dev` / `prd` | 任意の環境名 | GitHub Settings / `samconfig.toml` |
+| Stack 名 | `hongo-dev-nba-dashboard` | Prefix + ProjectName | `samconfig.toml` |
+| AWS Region | `ap-northeast-1` | 利用する Region | GitHub Environment vars |
+| AWS Account | 環境ごとに設定 | 実際の Account ID | GitHub Environment vars |
+| OIDC Trust Policy | repo + environment 制限 | 新しい repo / environment | AWS IAM |
+| Frontend ENV | `ENV_FILE` の内容 | フロントエンドの環境変数 | GitHub Environment secrets |
+| S3 Bucket | CloudFormation Output | 原則変更不要（命名規則のみ変更） | `template.yaml` |
+| API Endpoint | CloudFormation Output | 原則変更不要 | `template.yaml` Outputs |
+
+## 再利用できるもの vs 変更するもの
+
+**原則そのまま再利用できるもの**
+
+- Orchestrator + Reusable Workflow 構成
+- Backend → Frontend の順序制御（`needs`）
+- CloudFormation Outputs による値の受け渡し
+- AWS OIDC による認証方式
+- Reusable Workflow での Secret 受け渡し（`secrets: inherit`）
+- PR Check と Deploy の分離
+- `concurrency` の設計
+
+**プロジェクトごとに変更するもの**
+
+- ResourcePrefix / ProjectName
+- Environment 名 / Stack 名
+- AWS Region / Account ID
+- IAM Role ARN
+- OIDC Trust Policy 対象
+- `ENV_FILE` 内容
+- Ruleset 対象 branch
+
 ---
 
 # 21. 最終 `deploy.yml` の要点
+
+> **この章は構造を理解するための縮約版です。**  
+> コメント・詳細設定を含む完成版全文は「Appendix 27.1」を参照してください。
 
 以下はパターンを理解するための縮約版です。
 
@@ -2049,3 +2131,1794 @@ AWS への deployment
   https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/using-sam-cli-deploy.html
 
 ---
+
+# 27. Appendix: 現在の完成版 Workflow
+
+この章には、現在リポジトリで実際に使用している Workflow ファイルの全文を掲載します。
+
+各ファイルのコメントを含む完全な内容です。学習用の縮約版ではありません。
+
+## 27.1 deploy.yml
+
+```yaml
+# ============================================================
+# dev / prd への Deploy 全体を制御する Orchestrator Workflow
+#
+# この Workflow が Deploy の「唯一の入口」になる。
+#
+# push / workflow_dispatch
+#          │
+#          ▼
+#    target_environment 決定
+#          │
+#          ▼
+#   deploy-backend.yml
+#          │
+#          │ CloudFormation Outputs:
+#          │ - api_endpoint
+#          │ - frontend_bucket_name
+#          │ - cloudfront_distribution_id
+#          ▼
+#  deploy-frontend.yml
+#
+# 主な責務:
+# - Deploy Event の管理
+# - dev / prd の決定
+# - feature/* を Deploy 対象から除外
+# - Deploy 全体の concurrency 管理
+# - Backend -> Frontend の順序保証
+# - Backend Outputs -> Frontend Inputs の配線
+# ============================================================
+
+name: Deploy
+
+# ============================================================
+# 1. Trigger
+#
+# feature/*:
+#   Deploy しない。PR Check のみ。
+#
+# dev:
+#   dev Environment へ Deploy。
+#
+# main:
+#   prd Environment へ Deploy。
+#
+# paths:
+#   README 等だけの変更では Deploy しない。
+#   job-level の複雑な paths-filter はまだ導入しない。
+# ============================================================
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/deploy-backend.yml'
+      - '.github/workflows/deploy-frontend.yml'
+
+  workflow_dispatch:
+    inputs:
+      skip_test:
+        description: 'Frontend unit test をスキップする'
+        required: false
+        default: false
+        type: boolean
+
+# ============================================================
+# 2. Deploy-wide Concurrency
+#
+# Backend / Frontend 個別ではなく、
+# Orchestrator Run 全体を Environment 単位で直列化する。
+# ============================================================
+
+concurrency:
+  group: hongo-nba-dashboard-deploy-${{ github.ref == 'refs/heads/main' && 'prd' || 'dev' }}
+  cancel-in-progress: false
+
+# ============================================================
+# 3. Default Permissions
+#
+# Orchestrator 自身には原則 Permission を与えない。
+# AWS OIDC が必要な reusable workflow call Job だけに
+# contents: read / id-token: write を付与する。
+# ============================================================
+
+permissions: {}
+
+jobs:
+  # ==========================================================
+  # 4. Resolve Deployment Context
+  #
+  # Deploy 先を決める責務は Orchestrator のみ。
+  #
+  # main -> prd
+  # dev  -> dev
+  #
+  # workflow_dispatch で feature branch / tag を選んでも拒否する。
+  # ==========================================================
+
+  prepare:
+    name: Prepare Deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      target_environment: ${{ steps.resolve.outputs.target_environment }}
+
+    steps:
+      - name: Resolve target environment
+        id: resolve
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$REF_TYPE" != "branch" ]]; then
+            echo "::error::Deploy from ref type '${REF_TYPE}' is not allowed."
+            echo "::error::Select the 'dev' or 'main' branch."
+            exit 1
+          fi
+
+          case "$REF_NAME" in
+            main)
+              TARGET_ENVIRONMENT="prd"
+              ;;
+            dev)
+              TARGET_ENVIRONMENT="dev"
+              ;;
+            *)
+              echo "::error::Deploy from branch '${REF_NAME}' is not allowed."
+              echo "::error::Allowed branches are: dev, main"
+              exit 1
+              ;;
+          esac
+
+          echo "Branch: ${REF_NAME}"
+          echo "Target environment: ${TARGET_ENVIRONMENT}"
+          echo "target_environment=${TARGET_ENVIRONMENT}" >> "$GITHUB_OUTPUT"
+
+      - name: Write deployment plan
+        env:
+          TARGET_ENVIRONMENT: ${{ steps.resolve.outputs.target_environment }}
+          SKIP_TEST: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_test || false }}
+        run: |
+          set -Eeuo pipefail
+
+          {
+            echo "## Deployment Plan"
+            echo
+            echo "- Event: \`${GITHUB_EVENT_NAME}\`"
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Environment: \`${TARGET_ENVIRONMENT}\`"
+            echo "- Frontend test skip: \`${SKIP_TEST}\`"
+            echo "- Order: \`Backend / Infrastructure -> Frontend\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ==========================================================
+  # 5. Backend / Infrastructure
+  #
+  # `secrets: inherit` により Secrets / Variables を called workflow へ継承する。
+  # called workflow 内の Environment Job が直接参照する。
+  #
+  # outputs:
+  # - api_endpoint
+  # - frontend_bucket_name
+  # - cloudfront_distribution_id
+  # ==========================================================
+
+  backend:
+    name: Backend / Infrastructure
+    needs:
+      - prepare
+
+    permissions:
+      contents: read
+      id-token: write
+
+    uses: ./.github/workflows/deploy-backend.yml
+
+    secrets: inherit
+
+    with:
+      target_environment: ${{ needs.prepare.outputs.target_environment }}
+
+  # ==========================================================
+  # 6. Frontend
+  #
+  # needs: backend により Backend -> Frontend の順序を保証する。
+  #
+  # Backend が SAM Deploy 完了後に取得した3つの
+  # CloudFormation Outputs を Frontend へ渡す。
+  #
+  # これにより初回 AWS が空でも、
+  #
+  # Infrastructure 作成
+  #      ↓
+  # API Endpoint / S3 / CloudFront 確定
+  #      ↓
+  # Frontend .env 生成 / Build / Deploy
+  #
+  # の順で1 Run内に完結する。
+  # ==========================================================
+
+  frontend:
+    name: Frontend
+
+    needs:
+      - prepare
+      - backend
+
+    permissions:
+      contents: read
+      id-token: write
+
+    uses: ./.github/workflows/deploy-frontend.yml
+
+    secrets: inherit
+
+    with:
+      target_environment: ${{ needs.prepare.outputs.target_environment }}
+
+      api_endpoint: >-
+        ${{ needs.backend.outputs.api_endpoint }}
+
+      frontend_bucket_name: >-
+        ${{ needs.backend.outputs.frontend_bucket_name }}
+
+      cloudfront_distribution_id: >-
+        ${{ needs.backend.outputs.cloudfront_distribution_id }}
+
+      skip_test: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.skip_test || false }}
+```
+
+## 27.2 deploy-backend.yml
+
+```yaml
+# ============================================================
+# Backend / Infrastructure を AWS SAM で Deploy する
+# Reusable Workflow
+#
+# deploy.yml（Orchestrator）から workflow_call で呼び出され、
+# 指定された target_environment（dev / prd）へ Deploy する。
+#
+# 主な責務:
+# - target_environment の妥当性確認
+# - GitHub Environment の適用
+# - AWS OIDC 認証
+# - SAM Validate / Build / Deploy
+# - samconfig.toml から Stack 名を取得
+# - CloudFormation Outputs を取得
+# - Frontend Deploy に必要な値を Workflow Output として返す
+#
+# この Workflow 自身には以下を持たせない:
+# - push
+# - workflow_dispatch
+# - concurrency
+# - branch から dev / prd を判定するロジック
+#
+# Deploy の入口・環境決定・順序制御は deploy.yml の責務。
+# ============================================================
+
+name: Deploy Backend
+
+# ============================================================
+# 1. Reusable Workflow Interface
+#
+# input:
+#   target_environment
+#
+# outputs:
+#   api_endpoint
+#   frontend_bucket_name
+#   cloudfront_distribution_id
+#
+# AWS が生成する値は GitHub Secrets / Variables へ手入力せず、
+# CloudFormation Outputs を Source of Truth とする。
+# ============================================================
+
+on:
+  workflow_call:
+    inputs:
+      target_environment:
+        description: 'Deploy target environment: dev or prd'
+        required: true
+        type: string
+
+    outputs:
+      api_endpoint:
+        description: 'API Gateway endpoint URL from CloudFormation Outputs'
+        value: ${{ jobs.build-and-deploy.outputs.api_endpoint }}
+
+      frontend_bucket_name:
+        description: 'Frontend hosting S3 bucket name from CloudFormation Outputs'
+        value: ${{ jobs.build-and-deploy.outputs.frontend_bucket_name }}
+
+      cloudfront_distribution_id:
+        description: 'CloudFront Distribution ID from CloudFormation Outputs'
+        value: ${{ jobs.build-and-deploy.outputs.cloudfront_distribution_id }}
+
+# ============================================================
+# 2. Permissions
+#
+# contents: read
+#   checkout 用。
+#
+# id-token: write
+#   GitHub Actions OIDC から AWS の一時 Credential を取得するため。
+# ============================================================
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # ==========================================================
+  # 3. Input Validation
+  #
+  # workflow_call の string input は dev/prd の選択肢制限を
+  # 持たないため、明示的に検証する。
+  # ==========================================================
+
+  validate-inputs:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate target environment
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+        run: |
+          set -Eeuo pipefail
+
+          case "$TARGET_ENVIRONMENT" in
+            dev|prd)
+              echo "Target environment: ${TARGET_ENVIRONMENT}"
+              ;;
+            *)
+              echo "::error::Invalid target_environment: ${TARGET_ENVIRONMENT}"
+              echo "::error::Allowed values are: dev, prd"
+              exit 1
+              ;;
+          esac
+
+  # ==========================================================
+  # 4. Backend / Infrastructure Deploy
+  #
+  # Environment Secrets:
+  # - AWS_ROLE_ARN
+  #
+  # Environment Variables:
+  # - AWS_REGION
+  # - AWS_ACCOUNT_ID
+  #
+  # prd に Required Reviewer が設定されている場合、
+  # この Job の開始前に Approval が要求される。
+  # ==========================================================
+
+  build-and-deploy:
+    name: Build & Deploy Backend
+    needs:
+      - validate-inputs
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    environment:
+      name: ${{ inputs.target_environment }}
+
+    outputs:
+      api_endpoint: ${{ steps.cfn-outputs.outputs.api_endpoint }}
+      frontend_bucket_name: ${{ steps.cfn-outputs.outputs.frontend_bucket_name }}
+      cloudfront_distribution_id: ${{ steps.cfn-outputs.outputs.cloudfront_distribution_id }}
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+
+    steps:
+      # ======================================================
+      # 5. Checkout
+      # ======================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # ======================================================
+      # 6. Deploy Information
+      #
+      # Deploy 先は branch から再判定しない。
+      # Orchestrator から渡された target_environment を使う。
+      # ======================================================
+
+      - name: Log deployment information
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || 'N/A' }}
+        run: |
+          set -Eeuo pipefail
+
+          printf '%s\n' '=== Backend Deploy Start ==='
+          printf 'Environment : %s\n' "$TARGET_ENVIRONMENT"
+          printf 'Branch      : %s\n' "$GITHUB_REF_NAME"
+          printf 'Commit      : %s\n' "$GITHUB_SHA"
+          printf 'Actor       : %s\n' "$GITHUB_ACTOR"
+          printf 'Event       : %s\n' "$GITHUB_EVENT_NAME"
+          printf 'Message     : %s\n' "$COMMIT_MESSAGE"
+          printf '%s\n' '============================'
+
+      # ======================================================
+      # 7. GitHub Environment Configuration Validation
+      #
+      # Secret の中身そのものはログへ出さない。
+      # ======================================================
+
+      - name: Validate environment configuration
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "${AWS_ROLE_ARN:-}" ]]; then
+            echo "::error::AWS_ROLE_ARN is not configured."
+            exit 1
+          fi
+
+          if [[ -z "${AWS_REGION:-}" ]]; then
+            echo "::error::AWS_REGION is not configured."
+            exit 1
+          fi
+
+          if [[ -z "${AWS_ACCOUNT_ID:-}" ]]; then
+            echo "::error::AWS_ACCOUNT_ID is not configured."
+            exit 1
+          fi
+
+          echo "Environment configuration validated."
+
+      # ======================================================
+      # 8. Python Setup
+      #
+      # SAM Build と samconfig.toml の tomllib 解析に使用する。
+      # ======================================================
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      # ======================================================
+      # 9. SAM CLI Setup
+      # ======================================================
+
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ======================================================
+      # 10. AWS OIDC Authentication
+      #
+      # allowed-account-ids は誤った AWS Account への
+      # Deploy を防ぐ安全装置。
+      # ======================================================
+
+      - name: Configure AWS credentials from OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: sam-${{ inputs.target_environment }}-${{ github.run_id }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+
+      # ======================================================
+      # 11. SAM Validate
+      # ======================================================
+
+      - name: SAM Validate
+        run: sam validate --lint
+
+      # ======================================================
+      # 12. SAM Build
+      # ======================================================
+
+      - name: SAM Build
+        run: sam build
+
+      # ======================================================
+      # 13. SAM Deploy
+      #
+      # target_environment を samconfig.toml の config-env として
+      # そのまま利用する。
+      #
+      # --no-fail-on-empty-changeset:
+      #   Frontend だけの変更でも Backend -> Frontend の経路を
+      #   毎回維持するため、変更なしは正常系として扱う。
+      # ======================================================
+
+      - name: SAM Deploy
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+        run: |
+          set -Eeuo pipefail
+
+          echo "SAM config environment: ${TARGET_ENVIRONMENT}"
+
+          sam deploy \
+            --config-file samconfig.toml \
+            --config-env "$TARGET_ENVIRONMENT" \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset
+
+      # ======================================================
+      # 14. Resolve CloudFormation Stack Name
+      #
+      # STACK_NAME は GitHub Variable に持たない。
+      # samconfig.toml を Source of Truth とする。
+      # ======================================================
+
+      - name: Resolve CloudFormation stack name
+        id: stack
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+        run: |
+          set -Eeuo pipefail
+
+          STACK_NAME="$(
+            python - <<'PY'
+          import os
+          import tomllib
+
+          target = os.environ["TARGET_ENVIRONMENT"]
+
+          with open("samconfig.toml", "rb") as file:
+              config = tomllib.load(file)
+
+          try:
+              stack_name = config[target]["deploy"]["parameters"]["stack_name"]
+          except KeyError as exc:
+              raise SystemExit(
+                  f"stack_name is not configured for environment '{target}': {exc}"
+              )
+
+          if not stack_name:
+              raise SystemExit(
+                  f"stack_name is empty for environment '{target}'"
+              )
+
+          print(stack_name)
+          PY
+          )"
+
+          if [[ -z "${STACK_NAME:-}" ]]; then
+            echo "::error::Failed to resolve CloudFormation stack name."
+            exit 1
+          fi
+
+          echo "CloudFormation stack: ${STACK_NAME}"
+          echo "stack_name=${STACK_NAME}" >> "$GITHUB_OUTPUT"
+
+      # ======================================================
+      # 15. Get CloudFormation Outputs
+      #
+      # 初回 Deploy:
+      #
+      #   SAM Deploy
+      #      ↓
+      #   API Gateway / S3 / CloudFront 作成
+      #      ↓
+      #   Outputs 確定
+      #      ↓
+      #   この Step で取得
+      #
+      # 取得する契約値:
+      # - ApiEndpoint
+      # - FrontendBucketName
+      # - CloudFrontDistributionId
+      #
+      # どれか1つでも存在しなければ Frontend へ進ませない。
+      # ======================================================
+
+      - name: Get CloudFormation outputs
+        id: cfn-outputs
+        env:
+          STACK_NAME: ${{ steps.stack.outputs.stack_name }}
+        run: |
+          set -Eeuo pipefail
+
+          get_stack_output() {
+            local output_key="$1"
+
+            aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --query "Stacks[0].Outputs[?OutputKey=='${output_key}'].OutputValue | [0]" \
+              --output text
+          }
+
+          require_output() {
+            local output_key="$1"
+            local output_value="$2"
+
+            if [[
+              -z "${output_value:-}" ||
+              "$output_value" == "None" ||
+              "$output_value" == "null"
+            ]]; then
+              echo "::error::CloudFormation Output '${output_key}' was not found."
+              exit 1
+            fi
+          }
+
+          API_ENDPOINT="$(
+            get_stack_output "ApiEndpoint"
+          )"
+
+          FRONTEND_BUCKET_NAME="$(
+            get_stack_output "FrontendBucketName"
+          )"
+
+          CLOUDFRONT_DISTRIBUTION_ID="$(
+            get_stack_output "CloudFrontDistributionId"
+          )"
+
+          require_output "ApiEndpoint" "$API_ENDPOINT"
+          require_output "FrontendBucketName" "$FRONTEND_BUCKET_NAME"
+          require_output "CloudFrontDistributionId" "$CLOUDFRONT_DISTRIBUTION_ID"
+
+          if [[ "$API_ENDPOINT" != https://* ]]; then
+            echo "::error::ApiEndpoint is not an HTTPS URL."
+            exit 1
+          fi
+
+          echo "ApiEndpoint resolved successfully."
+          echo "FrontendBucketName resolved successfully."
+          echo "CloudFrontDistributionId resolved successfully."
+
+          {
+            echo "api_endpoint=${API_ENDPOINT}"
+            echo "frontend_bucket_name=${FRONTEND_BUCKET_NAME}"
+            echo "cloudfront_distribution_id=${CLOUDFRONT_DISTRIBUTION_ID}"
+          } >> "$GITHUB_OUTPUT"
+
+      # ======================================================
+      # 16. Deployment Summary
+      #
+      # 3つの Output は Frontend が利用する公開接続情報であり、
+      # Credential / Secret ではない。
+      # ======================================================
+
+      - name: Write deployment summary
+        if: ${{ success() }}
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          STACK_NAME: ${{ steps.stack.outputs.stack_name }}
+          API_ENDPOINT: ${{ steps.cfn-outputs.outputs.api_endpoint }}
+          FRONTEND_BUCKET_NAME: ${{ steps.cfn-outputs.outputs.frontend_bucket_name }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ steps.cfn-outputs.outputs.cloudfront_distribution_id }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -Eeuo pipefail
+
+          {
+            echo "## Backend / Infrastructure Deployment"
+            echo
+            echo "- Environment: \`${TARGET_ENVIRONMENT}\`"
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Stack: \`${STACK_NAME}\`"
+            echo "- AWS Region: \`${AWS_REGION}\`"
+            echo "- API Endpoint: \`${API_ENDPOINT}\`"
+            echo "- Frontend Bucket: \`${FRONTEND_BUCKET_NAME}\`"
+            echo "- CloudFront Distribution: \`${CLOUDFRONT_DISTRIBUTION_ID}\`"
+            echo "- Result: ✅ Success"
+          } >> "$GITHUB_STEP_SUMMARY"
+```
+
+## 27.3 deploy-frontend.yml
+
+```yaml
+# ============================================================
+# Frontend を Build / Test し、S3 + CloudFront へ Deploy する
+# Reusable Workflow
+#
+# deploy.yml（Orchestrator）から workflow_call で呼び出され、
+# deploy-backend.yml が返した CloudFormation Outputs を受け取る。
+#
+# 主な責務:
+# - target_environment / Deploy先 Inputs の妥当性確認
+# - GitHub Environment の適用
+# - ENV_FILE（静的設定）と ApiEndpoint（動的設定）から .env を生成
+# - npm ci / Unit Test / Build
+# - Build Artifact 保存
+# - AWS OIDC 認証
+# - frontend/dist -> S3 ルート Deploy
+# - CloudFront Cache Invalidation
+#
+# この Workflow 自身には以下を持たせない:
+# - push
+# - workflow_dispatch
+# - concurrency
+# - branch から dev / prd を判定するロジック
+# - S3_BUCKET_NAME GitHub Variable
+# - BUILD_MODE GitHub Variable
+# - API Gateway URL の GitHub Secret / Variable
+#
+# ============================================================
+# ENV_FILE の重要な運用ルール
+#
+# API Gateway の実URLを ENV_FILE に保存しない。
+#
+# 現在使っている「API URL の環境変数名」はそのまま残し、
+# 値だけ以下の Placeholder に変更する。
+#
+#   __API_ENDPOINT__
+#
+# 例:
+#
+#   変更前:
+#     VITE_API_BASE_URL=https://xxxxx.execute-api.../api
+#
+#   変更後:
+#     VITE_API_BASE_URL=__API_ENDPOINT__
+#
+# Workflow 実行時に __API_ENDPOINT__ を
+# CloudFormation Output の ApiEndpoint へ置換して .env を生成する。
+#
+# この方式なら、Frontend 側の実際の環境変数名を Workflow が
+# 知る必要がなく、既存コードの環境変数名も変更不要。
+# ============================================================
+
+name: Deploy Frontend
+
+# ============================================================
+# 1. Reusable Workflow Interface
+# ============================================================
+
+on:
+  workflow_call:
+    inputs:
+      target_environment:
+        description: 'Deploy target environment: dev or prd'
+        required: true
+        type: string
+
+      api_endpoint:
+        description: 'API Gateway endpoint URL from CloudFormation Outputs'
+        required: true
+        type: string
+
+      frontend_bucket_name:
+        description: 'Frontend hosting S3 bucket name from CloudFormation Outputs'
+        required: true
+        type: string
+
+      cloudfront_distribution_id:
+        description: 'CloudFront Distribution ID from CloudFormation Outputs'
+        required: true
+        type: string
+
+      skip_test:
+        description: 'Skip frontend unit tests'
+        required: false
+        default: false
+        type: boolean
+
+# ============================================================
+# 2. Permissions
+# ============================================================
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # ==========================================================
+  # 3. Input Validation
+  # ==========================================================
+
+  validate-inputs:
+    name: Validate Inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate deployment inputs
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          API_ENDPOINT: ${{ inputs.api_endpoint }}
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront_distribution_id }}
+        run: |
+          set -Eeuo pipefail
+
+          case "$TARGET_ENVIRONMENT" in
+            dev|prd)
+              ;;
+            *)
+              echo "::error::Invalid target_environment: ${TARGET_ENVIRONMENT}"
+              echo "::error::Allowed values are: dev, prd"
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "${API_ENDPOINT:-}" || "$API_ENDPOINT" == "None" || "$API_ENDPOINT" == "null" ]]; then
+            echo "::error::api_endpoint is empty."
+            exit 1
+          fi
+
+          if [[ "$API_ENDPOINT" != https://* ]]; then
+            echo "::error::api_endpoint is not an HTTPS URL."
+            exit 1
+          fi
+
+          if [[ -z "${FRONTEND_BUCKET_NAME:-}" ]]; then
+            echo "::error::frontend_bucket_name is empty."
+            exit 1
+          fi
+
+          if [[ -z "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]]; then
+            echo "::error::cloudfront_distribution_id is empty."
+            exit 1
+          fi
+
+          echo "Target environment: ${TARGET_ENVIRONMENT}"
+          echo "Frontend deployment inputs validated."
+
+  # ==========================================================
+  # 4. Frontend Build / Deploy
+  #
+  # Environment Secrets:
+  # - AWS_ROLE_ARN
+  # - ENV_FILE
+  #
+  # Environment Variables:
+  # - AWS_REGION
+  # - AWS_ACCOUNT_ID
+  #
+  # ENV_FILE に API Gateway の実URLは保存しない。
+  # __API_ENDPOINT__ Placeholder のみを保持する。
+  # ==========================================================
+
+  build-and-deploy:
+    name: Build & Deploy Frontend
+    needs:
+      - validate-inputs
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    environment:
+      name: ${{ inputs.target_environment }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # ======================================================
+      # 5. Checkout
+      # ======================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # ======================================================
+      # 6. Deploy Information
+      # ======================================================
+
+      - name: Log deployment information
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          API_ENDPOINT: ${{ inputs.api_endpoint }}
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront_distribution_id }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || 'N/A' }}
+        run: |
+          set -Eeuo pipefail
+
+          printf '%s\n' '=== Frontend Deploy Start ==='
+          printf 'Environment : %s\n' "$TARGET_ENVIRONMENT"
+          printf 'Branch      : %s\n' "$GITHUB_REF_NAME"
+          printf 'Commit      : %s\n' "$GITHUB_SHA"
+          printf 'Actor       : %s\n' "$GITHUB_ACTOR"
+          printf 'Event       : %s\n' "$GITHUB_EVENT_NAME"
+          printf 'API         : %s\n' "$API_ENDPOINT"
+          printf 'Bucket      : %s\n' "$FRONTEND_BUCKET_NAME"
+          printf 'CloudFront  : %s\n' "$CLOUDFRONT_DISTRIBUTION_ID"
+          printf 'Message     : %s\n' "$COMMIT_MESSAGE"
+          printf '%s\n' '============================='
+
+      # ======================================================
+      # 7. GitHub Environment Configuration Validation
+      #
+      # ENV_FILE の内容自体はログへ出さない。
+      # ======================================================
+
+      - name: Validate environment configuration
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "${AWS_ROLE_ARN:-}" ]]; then
+            echo "::error::AWS_ROLE_ARN is not configured."
+            exit 1
+          fi
+
+          if [[ -z "${ENV_FILE:-}" ]]; then
+            echo "::error::ENV_FILE is not configured."
+            exit 1
+          fi
+
+          if [[ "$ENV_FILE" != *"__API_ENDPOINT__"* ]]; then
+            echo "::error::ENV_FILE does not contain the __API_ENDPOINT__ placeholder."
+            echo "::error::Replace the existing API Gateway URL value with __API_ENDPOINT__."
+            exit 1
+          fi
+
+          if [[ -z "${AWS_REGION:-}" ]]; then
+            echo "::error::AWS_REGION is not configured."
+            exit 1
+          fi
+
+          if [[ -z "${AWS_ACCOUNT_ID:-}" ]]; then
+            echo "::error::AWS_ACCOUNT_ID is not configured."
+            exit 1
+          fi
+
+          echo "Environment configuration validated."
+
+      # ======================================================
+      # 8. Node.js Setup
+      # ======================================================
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # ======================================================
+      # 9. Install Dependencies
+      # ======================================================
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # ======================================================
+      # 10. Check Test Script
+      # ======================================================
+
+      - name: Check test script
+        id: check-test
+        working-directory: frontend
+        run: |
+          set -Eeuo pipefail
+
+          if node -e '
+            const p = require("./package.json");
+            process.exit(p.scripts && p.scripts.test ? 0 : 1);
+          '; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ======================================================
+      # 11. Unit Test
+      #
+      # Test failure は一旦保持し、Artifact 保存後に failure を返す。
+      # ======================================================
+
+      - name: Run unit tests
+        id: unit-test
+        if: >-
+          ${{
+            steps.check-test.outputs.exists == 'true' &&
+            inputs.skip_test != true
+          }}
+        working-directory: frontend
+        env:
+          CI: 'true'
+        run: npm test
+        continue-on-error: true
+
+      # ======================================================
+      # 12. Test Result Artifact
+      # ======================================================
+
+      - name: Upload test results
+        if: >-
+          ${{
+            always() &&
+            steps.check-test.outputs.exists == 'true' &&
+            inputs.skip_test != true
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-results-${{ github.sha }}
+          path: frontend/test-results.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ======================================================
+      # 13. Propagate Test Failure
+      # ======================================================
+
+      - name: Fail when unit tests failed
+        if: ${{ steps.unit-test.outcome == 'failure' }}
+        run: |
+          echo "::error::Unit tests failed."
+          exit 1
+
+      # ======================================================
+      # 14. Generate .env
+      #
+      # ENV_FILE:
+      #   GitHub Environment Secret に保持する静的設定。
+      #
+      # API_ENDPOINT:
+      #   SAM Deploy 後の CloudFormation Output。
+      #
+      # ENV_FILE 内の __API_ENDPOINT__ を API_ENDPOINT に置換し、
+      # Build に使用する最終的な frontend/.env を生成する。
+      #
+      # 既存の環境変数名は変更不要。
+      # 例:
+      #
+      #   VITE_API_BASE_URL=__API_ENDPOINT__
+      #
+      #      ↓
+      #
+      #   VITE_API_BASE_URL=https://xxxxx.execute-api.../api
+      #
+      # Secret の内容や完成した .env はログへ表示しない。
+      # ======================================================
+
+      - name: Create .env file
+        working-directory: frontend
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+          API_ENDPOINT: ${{ inputs.api_endpoint }}
+        run: |
+          set -Eeuo pipefail
+
+          PLACEHOLDER="__API_ENDPOINT__"
+
+          if [[ "$ENV_FILE" != *"$PLACEHOLDER"* ]]; then
+            echo "::error::ENV_FILE does not contain ${PLACEHOLDER}."
+            exit 1
+          fi
+
+          RENDERED_ENV="${ENV_FILE//$PLACEHOLDER/$API_ENDPOINT}"
+
+          if [[ "$RENDERED_ENV" == *"$PLACEHOLDER"* ]]; then
+            echo "::error::Failed to replace API endpoint placeholder."
+            exit 1
+          fi
+
+          umask 077
+          printf '%s\n' "$RENDERED_ENV" > .env
+
+          echo "frontend/.env generated successfully."
+
+      # ======================================================
+      # 15. Frontend Build
+      #
+      # BUILD_MODE GitHub Variable は廃止。
+      #
+      # dev -> npm run build-only:dev
+      # prd -> npm run build-only:prd
+      # ======================================================
+
+      - name: Build application
+        working-directory: frontend
+        env:
+          BUILD_MODE: ${{ inputs.target_environment }}
+        run: |
+          set -Eeuo pipefail
+          npm run "build-only:${BUILD_MODE}"
+
+      # ======================================================
+      # 16. Remove .env
+      #
+      # Build failure 時も always() で削除する。
+      # ======================================================
+
+      - name: Remove .env file
+        if: ${{ always() }}
+        working-directory: frontend
+        run: rm -f .env
+
+      # ======================================================
+      # 17. Verify Build Output
+      #
+      # --delete 付き S3 sync の前に空成果物を防ぐ。
+      # ======================================================
+
+      - name: Verify build output
+        working-directory: frontend
+        run: |
+          set -Eeuo pipefail
+
+          if [[ ! -d dist ]]; then
+            echo "::error::frontend/dist directory does not exist."
+            exit 1
+          fi
+
+          FILE_COUNT="$(
+            find dist -type f -print | wc -l
+          )"
+
+          if (( FILE_COUNT == 0 )); then
+            echo "::error::frontend/dist is empty."
+            exit 1
+          fi
+
+          echo "Build output files: ${FILE_COUNT}"
+
+      # ======================================================
+      # 18. Build Artifact
+      # ======================================================
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist-${{ github.sha }}
+          path: frontend/dist/
+          retention-days: 3
+          if-no-files-found: error
+          include-hidden-files: true
+
+      # ======================================================
+      # 19. AWS OIDC Authentication
+      #
+      # Backend Workflow とは別 Runner なので、
+      # Frontend 側でも Credential を取得する。
+      # ======================================================
+
+      - name: Configure AWS credentials from OIDC
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: frontend-${{ inputs.target_environment }}-${{ github.run_id }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+
+      # ======================================================
+      # 20. Verify Frontend Bucket
+      #
+      # S3 Bucket 名は Backend / CloudFormation Output 由来。
+      # ======================================================
+
+      - name: Verify frontend bucket
+        env:
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+        run: |
+          set -Eeuo pipefail
+
+          aws s3api head-bucket \
+            --bucket "$FRONTEND_BUCKET_NAME"
+
+          echo "Frontend bucket is accessible."
+
+      # ======================================================
+      # 21. Deploy Frontend to S3
+      # ======================================================
+
+      - name: Deploy frontend to S3
+        env:
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+        run: |
+          set -Eeuo pipefail
+
+          BUCKET="s3://${FRONTEND_BUCKET_NAME}"
+
+          if [[ ! -d frontend/dist ]]; then
+            echo "::error::frontend/dist does not exist."
+            exit 1
+          fi
+
+          LOCAL_FILE_COUNT="$(
+            find frontend/dist -type f -print | wc -l
+          )"
+
+          if (( LOCAL_FILE_COUNT == 0 )); then
+            echo "::error::frontend/dist is empty."
+            exit 1
+          fi
+
+          echo "Local build files: ${LOCAL_FILE_COUNT}"
+
+          aws s3 sync \
+            frontend/dist/ \
+            "${BUCKET}/" \
+            --delete \
+            --only-show-errors
+
+          echo "S3 sync completed."
+
+      # ======================================================
+      # 23. Verify S3 Deployment
+      # ======================================================
+
+      - name: Verify S3 deployment
+        env:
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+        run: |
+          set -Eeuo pipefail
+
+          DEPLOYED_OBJECT_COUNT="$(
+            aws s3api list-objects-v2 \
+              --bucket "$FRONTEND_BUCKET_NAME" \
+              --max-keys 1 \
+              --query 'KeyCount' \
+              --output text
+          )"
+
+          if (( DEPLOYED_OBJECT_COUNT == 0 )); then
+            echo "::error::No objects found after frontend deployment."
+            exit 1
+          fi
+
+          echo "Frontend deployment verified."
+
+      # ======================================================
+      # 24. CloudFront Cache Invalidation
+      #
+      # IAM Role には cloudfront:CreateInvalidation が必要。
+      # ======================================================
+
+      - name: Invalidate CloudFront cache
+        id: cloudfront-invalidation
+        env:
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront_distribution_id }}
+        run: |
+          set -Eeuo pipefail
+
+          INVALIDATION_ID="$(
+            aws cloudfront create-invalidation \
+              --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+              --paths "/*" \
+              --query 'Invalidation.Id' \
+              --output text
+          )"
+
+          if [[
+            -z "${INVALIDATION_ID:-}" ||
+            "$INVALIDATION_ID" == "None" ||
+            "$INVALIDATION_ID" == "null"
+          ]]; then
+            echo "::error::Failed to create CloudFront invalidation."
+            exit 1
+          fi
+
+          echo "CloudFront invalidation created: ${INVALIDATION_ID}"
+          echo "invalidation_id=${INVALIDATION_ID}" >> "$GITHUB_OUTPUT"
+
+      # ======================================================
+      # 25. Deployment Summary
+      # ======================================================
+
+      - name: Write deployment summary
+        if: ${{ success() }}
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          API_ENDPOINT: ${{ inputs.api_endpoint }}
+          FRONTEND_BUCKET_NAME: ${{ inputs.frontend_bucket_name }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront_distribution_id }}
+          INVALIDATION_ID: ${{ steps.cloudfront-invalidation.outputs.invalidation_id }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -Eeuo pipefail
+
+          {
+            echo "## Frontend Deployment"
+            echo
+            echo "- Environment: \`${TARGET_ENVIRONMENT}\`"
+            echo "- Branch: \`${GITHUB_REF_NAME}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- AWS Region: \`${AWS_REGION}\`"
+            echo "- API Endpoint: \`${API_ENDPOINT}\`"
+            echo "- S3 Bucket: \`${FRONTEND_BUCKET_NAME}\`"
+            echo "- CloudFront Distribution: \`${CLOUDFRONT_DISTRIBUTION_ID}\`"
+            echo "- CloudFront Invalidation: \`${INVALIDATION_ID}\`"
+            echo "- Result: ✅ Success"
+          } >> "$GITHUB_STEP_SUMMARY"
+```
+
+## 27.4 backend-pr-check.yml
+
+```yaml
+# ============================================================
+# Pull Request 作成・更新時に、フロントエンドとバックエンドを
+# 自動検証するためのワークフロー
+#
+# このファイルでは、PR を merge する前に
+# 「ビルドできるか」「テストが通るか」「SAM テンプレートが正しいか」
+# を確認する。
+#
+# 主な役割:
+#
+# - main / dev 向け Pull Request の自動チェック
+# - 同一 PR に追加 push があった場合、古いチェックをキャンセル
+# - Backend の SAM Validate / SAM Build
+# - Frontend の Unit Test / Type Check / Build
+# - テスト失敗時でも Artifact を保存
+# - Test / Build の両方を確認してから最終的な成否を判定
+#
+# Deploy Workflow と異なり、この Workflow 自体は
+# AWS 環境へのデプロイを行わない。
+# ============================================================
+name: Backend PR Check
+
+
+# ============================================================
+# 1. ワークフローの発火条件
+#
+# pull_request:
+#   main または dev をマージ先とする Pull Request に対して実行する。
+#
+# types:
+#   PR の作成・更新・再オープン・レビュー開始時に実行する。
+#
+# opened:
+#   新しい Pull Request が作成されたとき。
+#
+# synchronize:
+#   PR のブランチへ追加 push されたとき。
+#
+# reopened:
+#   Close 済みの PR が再度 Open されたとき。
+#
+# ready_for_review:
+#   Draft PR が Ready for review に変更されたとき。
+#
+# PR のタイトル変更だけでは実行されず、
+# コード変更やレビュー開始など、検証が必要なタイミングに限定する。
+# ============================================================
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+
+# ============================================================
+# 2. 同一 PR のチェックを重複実行させない
+#
+# Pull Request に新しい commit が push された場合、
+# 古い commit に対する CI を最後まで実行しても意味が薄い。
+#
+# group:
+#   PR 番号ごとに同じ concurrency group を使用する。
+#
+# cancel-in-progress: true:
+#   同じ PR に新しい push が来たら、
+#   実行中の古い PR Check をキャンセルし、
+#   最新 commit のチェックだけを継続する。
+#
+# Deploy Workflow では途中キャンセルが危険なため false にしているが、
+# PR Check は「最新コードの検証」が目的なので true が適している。
+# ============================================================
+concurrency:
+  group: backend-pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+
+jobs:
+  # ==========================================================
+  # 3. Backend Check
+  #
+  # backend/ 配下の SAM アプリケーションについて、
+  # template.yaml の静的検証と実際の Build を行う。
+  #
+  # Deploy は行わないため AWS OIDC 認証は不要。
+  # ==========================================================
+  check-backend:
+    name: Backend Check
+
+    # GitHub が用意する Linux Runner 上で実行する。
+    runs-on: ubuntu-latest
+
+    # 異常終了せず処理が止まった場合でも、
+    # 15分でジョブを終了させる。
+    timeout-minutes: 15
+
+    # ========================================================
+    # 4. Backend Job の run 共通設定
+    #
+    # SAM CLI は backend/template.yaml などを参照するため、
+    # run ステップの作業ディレクトリを backend/ に統一する。
+    #
+    # shell: bash:
+    #   shell script を Bash として実行する。
+    # ========================================================
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+
+    # ========================================================
+    # 5. Backend Job の GitHub Token 権限
+    #
+    # PR Check ではリポジトリの読み取りだけが必要。
+    #
+    # contents: read:
+    #   actions/checkout がソースコードを取得するために必要。
+    #
+    # Deploy を行わないため id-token: write は付与しない。
+    # 必要以上の権限を与えない最小権限の構成にする。
+    # ========================================================
+    permissions:
+      contents: read
+
+    steps:
+      # ======================================================
+      # 6. リポジトリを Runner に取得
+      #
+      # GitHub Actions の Runner は毎回新しい環境なので、
+      # 最初に対象 PR のソースコードを checkout する。
+      #
+      # persist-credentials: false:
+      #   この Workflow では git push を行わないため、
+      #   GITHUB_TOKEN を git config に残さない。
+      # ======================================================
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # ======================================================
+      # 7. Pull Request 情報をログへ出力
+      #
+      # 障害調査時に、どの PR / ブランチ / 実行者のチェックかを
+      # Actions のログだけで確認できるようにする。
+      #
+      # PR Title などは外部入力になり得るため、
+      # run: に GitHub Expression を直接埋め込まず env 経由で渡す。
+      # ======================================================
+      - name: Log PR info
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          printf '%s\n' '=== PR Check Start (Backend) ==='
+          printf 'PR Number: %s\n' "$PR_NUMBER"
+          printf 'PR Title : %s\n' "$PR_TITLE"
+          printf 'Branch   : %s -> %s\n' "$HEAD_REF" "$BASE_REF"
+          printf 'Actor    : %s\n' "$ACTOR"
+          printf '%s\n' '================================'
+
+      # ======================================================
+      # 8. Python をセットアップ
+      #
+      # SAM Build / Lambda で利用する Python バージョンを
+      # CI 上にも用意する。
+      #
+      # ローカル環境と CI の Python バージョンを揃えることで、
+      # 環境差による Build エラーを減らせる。
+      # ======================================================
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      # ======================================================
+      # 9. AWS SAM CLI をセットアップ
+      #
+      # SAM CLI は template.yaml の Validate / Build に使用する。
+      #
+      # use-installer: true:
+      #   SAM CLI のネイティブインストーラーを利用する。
+      #
+      # token:
+      #   GitHub API 利用時の rate limit を避けるため、
+      #   GitHub が自動発行する Token を渡す。
+      #
+      # AWS へ Deploy はしないため、
+      # AWS Credential はここでは取得しない。
+      # ======================================================
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+          token: ${{ github.token }}
+
+      # ======================================================
+      # 10. SAM Template の静的検証
+      #
+      # template.yaml の構文や lint エラーを確認する。
+      #
+      # PR の段階で Template の問題を検出することで、
+      # merge 後の Deploy Workflow で初めて失敗することを防ぐ。
+      #
+      # AWS_DEFAULT_REGION:
+      #   SAM Validate が必要とする Region を明示する。
+      # ======================================================
+      - name: SAM Validate
+        env:
+          AWS_DEFAULT_REGION: ap-northeast-1
+        run: sam validate --lint
+
+      # ======================================================
+      # 11. SAM Build
+      #
+      # Validate が通った Template を実際に Build する。
+      #
+      # Validate は通るが Build は失敗するケースもあるため、
+      # merge 前に sam build まで確認しておく。
+      #
+      # ここが失敗した場合、この Backend Check は failure になる。
+      # ======================================================
+      - name: SAM Build
+        run: sam build
+```
+
+## 27.5 frontend-pr-check.yml
+
+```yaml
+# ============================================================
+# Pull Request 作成・更新時に、フロントエンドを自動検証するための
+# ワークフロー
+#
+# このファイルでは、PR を merge する前に
+# 「Unit Test」「Type Check」「Build」を確認する。
+# ============================================================
+name: Frontend PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: frontend-pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+
+  #
+  # frontend/ 配下について以下を確認する。
+  #
+  # - npm 依存関係の再現可能なインストール
+  # - Unit Test
+  # - Type Check
+  # - Vite Build
+  #
+  # Test と Build の両方を最後まで実行し、
+  # 1回の CI で可能な限り多くの問題を確認する。
+  # ==========================================================
+  check-frontend:
+    name: Frontend Check
+
+    # GitHub が用意する Linux Runner 上で実行する。
+    runs-on: ubuntu-latest
+
+    # 異常終了せず処理が止まった場合でも、
+    # 15分でジョブを終了させる。
+    timeout-minutes: 15
+
+    # ========================================================
+    # 13. Frontend Job の GitHub Token 権限
+    #
+    # PR Check ではソースコードの読み取りだけを行う。
+    #
+    # Artifact の Upload は actions/upload-artifact が処理するため、
+    # checks: write のような追加権限は不要。
+    # ========================================================
+    permissions:
+      contents: read
+
+    steps:
+      # ======================================================
+      # 14. リポジトリを Runner に取得
+      #
+      # PR のソースコードを Runner 上へ checkout する。
+      #
+      # persist-credentials: false:
+      #   git push などを行わないため、
+      #   GITHUB_TOKEN を git config に残さない。
+      # ======================================================
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # ======================================================
+      # 15. Pull Request 情報をログへ出力
+      #
+      # PR 番号・タイトル・変更元/変更先ブランチ・実行者を
+      # Actions のログから確認できるようにする。
+      #
+      # PR Title などは外部入力になり得るため、
+      # GitHub Expression を run: に直接埋め込まず env 経由で渡す。
+      # ======================================================
+      - name: Log PR info
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          printf '%s\n' '=== PR Check Start (Frontend) ==='
+          printf 'PR Number: %s\n' "$PR_NUMBER"
+          printf 'PR Title : %s\n' "$PR_TITLE"
+          printf 'Branch   : %s -> %s\n' "$HEAD_REF" "$BASE_REF"
+          printf 'Actor    : %s\n' "$ACTOR"
+          printf '%s\n' '================================='
+
+      # ======================================================
+      # 16. Node.js をセットアップ
+      #
+      # PR のテスト・型チェック・Build に使用する Node.js を
+      # GitHub Actions Runner 上へ用意する。
+      #
+      # cache: npm:
+      #   npm のキャッシュを利用し、
+      #   2回目以降の依存パッケージ取得を高速化する。
+      #
+      # cache-dependency-path:
+      #   frontend/package-lock.json をキャッシュ更新判定に利用する。
+      # ======================================================
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # ======================================================
+      # 17. 依存パッケージをインストール
+      #
+      # CI では npm install ではなく npm ci を使用する。
+      #
+      # package-lock.json に固定された依存関係を使って
+      # クリーンインストールするため、
+      # 開発PCとCIで依存バージョンがずれるリスクを減らせる。
+      # ======================================================
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      # ======================================================
+      # 18. Unit Test
+      #
+      # Vitest など package.json の test script を実行する。
+      #
+      # CI=true:
+      #   テストツール側に CI 環境であることを明示する。
+      #
+      # continue-on-error: true:
+      #   Unit Test が失敗しても、この時点では Job 全体を止めない。
+      #
+      # 先に Artifact 保存と Type Check / Build まで実行し、
+      # 最後に Test / Build の結果をまとめて判定する。
+      #
+      # これにより、1回の PR Check で複数の問題を発見しやすくなる。
+      # ======================================================
+      - name: Run unit tests
+        id: vitest
+        working-directory: frontend
+        env:
+          CI: 'true'
+        run: npm run test
+        continue-on-error: true
+
+      # ======================================================
+      # 19. Unit Test の結果を Artifact として保存
+      #
+      # テスト失敗時でも always() により実行する。
+      #
+      # test-results.xml を残すことで、
+      # Job が failure になったあとでも詳細なテスト結果を確認できる。
+      #
+      # if-no-files-found: ignore:
+      #   Test Runner 側で XML が生成されなかった場合でも、
+      #   Artifact Upload 自体では Workflow を失敗させない。
+      # ======================================================
+      - name: Upload test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-results-${{ github.event.pull_request.number }}
+          path: frontend/test-results.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # ======================================================
+      # 20. Type Check & Build
+      #
+      # package.json の build script を実行し、
+      # TypeScript の型チェックと Vite Build を確認する。
+      #
+      # Unit Test が失敗していてもこの Step は実行される。
+      #
+      # continue-on-error: true:
+      #   Build が失敗しても、ここでは Job を止めず、
+      #   最後の Check frontend result でまとめて成否を判定する。
+      #
+      # これにより、
+      #
+      #   Unit Test NG
+      #   Type Check NG
+      #
+      # のような複数の問題を1回のCIで確認できる。
+      # ======================================================
+      - name: Type check & Build
+        id: frontend-build
+        working-directory: frontend
+        run: npm run build
+        continue-on-error: true
+
+      # ======================================================
+      # 21. Frontend Check の最終判定
+      #
+      # Unit Test または Build のどちらか一方でも失敗していれば、
+      # Job 全体を failure にする。
+      #
+      # always():
+      #   前の Step の結果に関係なく、この判定処理を実行する。
+      #
+      # steps.<id>.outcome:
+      #   continue-on-error 適用前の実際の Step 結果を確認できる。
+      #
+      # Test / Build の結果をログにも出してから exit 1 するため、
+      # PR 画面から原因を追いやすい。
+      # ======================================================
+      - name: Check frontend result
+        if: >-
+          ${{
+            always() &&
+            (
+              steps.vitest.outcome == 'failure' ||
+              steps.frontend-build.outcome == 'failure'
+            )
+          }}
+        env:
+          TEST_OUTCOME: ${{ steps.vitest.outcome }}
+          BUILD_OUTCOME: ${{ steps.frontend-build.outcome }}
+        run: |
+          printf 'Unit test outcome : %s\n' "$TEST_OUTCOME"
+          printf 'Build outcome     : %s\n' "$BUILD_OUTCOME"
+          exit 1
+```

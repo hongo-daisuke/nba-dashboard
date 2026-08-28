@@ -48,3 +48,6 @@ vite.config.d.ts
 
 # ---- 作業用アーカイブ ----
 *.zip
+
+# ---- ドキュメント生成スクリプト ----
+docs/gen_html.py
