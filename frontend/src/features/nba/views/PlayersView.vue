@@ -67,6 +67,7 @@ const fetchPlayers = async () => {
     })
     players.value = response.players
   } catch {
+    players.value = []
     error.value = '選手データの取得に失敗しました。API URLが正しく設定されているか確認してください。'
   } finally {
     loading.value = false
