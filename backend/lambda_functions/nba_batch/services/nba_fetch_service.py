@@ -89,20 +89,23 @@ def fetch_players(all_teams: list[dict], season: str) -> list[dict]:
         logger.info("ロスター取得中", extra={"team": team["full_name"], "index": i + 1, "total": len(all_teams)})
         data = _get(f"{ESPN_BASE_URL}/teams/{team['team_id']}/roster")
 
-        for athlete in data.get("athletes", []):
-            pos = athlete.get("position") or {}
-            result.append({
-                "player_id": str(athlete["id"]),
-                "name": athlete["displayName"],
-                "jersey_number": str(athlete.get("jersey") or "N/A"),
-                "position": str(pos.get("abbreviation") or "N/A"),
-                "height": str(athlete.get("displayHeight") or "N/A"),
-                "weight": str(athlete.get("displayWeight") or "N/A"),
-                "age": int(athlete.get("age") or 0),
-                "team_id": team["team_id"],
-                "team_name": team["full_name"],
-                "team_abbreviation": team["abbreviation"],
-            })
+        # ESPN roster は Guard/Forward/Center グループで返す
+        # athletes[n] = { position: "Guard", items: [ {個別選手} ] }
+        for group in data.get("athletes", []):
+            for athlete in group.get("items", []):
+                pos = athlete.get("position") or {}
+                result.append({
+                    "player_id": str(athlete["id"]),
+                    "name": athlete["displayName"],
+                    "jersey_number": str(athlete.get("jersey") or "N/A"),
+                    "position": str(pos.get("abbreviation") or "N/A"),
+                    "height": str(athlete.get("displayHeight") or "N/A"),
+                    "weight": str(athlete.get("displayWeight") or "N/A"),
+                    "age": int(athlete.get("age") or 0),
+                    "team_id": team["team_id"],
+                    "team_name": team["full_name"],
+                    "team_abbreviation": team["abbreviation"],
+                })
 
     logger.info("選手データ取得完了", extra={"count": len(result)})
     return result
