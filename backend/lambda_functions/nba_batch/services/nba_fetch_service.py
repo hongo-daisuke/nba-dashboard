@@ -54,7 +54,11 @@ def fetch_teams(season: str) -> list[dict]:
         abbr = team["abbreviation"]
         static = TEAM_STATIC.get(abbr, {})
         if not static:
-            logger.warning("TEAM_STATIC に未登録の abbreviation", extra={"abbreviation": abbr, "full_name": team.get("displayName", "")})
+            # TEAM_STATIC 未登録 = NBA 30チーム以外のエントリ（拡張チーム・特殊エントリ等）
+            # conference-index GSI への書き込みも不要なためスキップする
+            # 正規チームを追加する場合は constants.py の TEAM_STATIC に追記すること
+            logger.warning("TEAM_STATIC に未登録の abbreviation、スキップします", extra={"abbreviation": abbr, "full_name": team.get("displayName", "")})
+            continue
 
         item: dict = {
             "team_id": str(team["id"]),
